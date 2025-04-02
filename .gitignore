@@ -8,3 +8,10 @@ __pycache__/
 *.xlsx
 *.xls
 *.docx
+*.pickle
+*.pkl
+*.pt
+*.pth
+*.pkl.gz
+*.pkl.bz2
+*.pkl.zip

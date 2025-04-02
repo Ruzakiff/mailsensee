@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: mailsense
+Version: 1.0.0
+Summary: Mailsense Chrome Extension with Google OAuth
+Author: Mailsense Team
+Author-email: info@mailsense.com
+Keywords: email,chrome extension,oauth
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.6
+Requires-Dist: google-auth
+Requires-Dist: google-auth-oauthlib
+Requires-Dist: google-auth-httplib2
+Requires-Dist: google-api-python-client
+Requires-Dist: flask
+Requires-Dist: requests
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: keywords
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+A Chrome extension that provides OAuth login with Google

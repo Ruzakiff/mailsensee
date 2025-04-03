@@ -12,11 +12,14 @@ import re
 import argparse
 import asyncio
 import time
+import ssl
 from typing import List, Dict, Any, Tuple
 import tiktoken
-import aiohttp
 import json
 from dotenv import load_dotenv
+import concurrent.futures
+from openai import OpenAI, AsyncOpenAI
+from openai.types.chat import ChatCompletionMessage
 
 # Load environment variables from .env file (including OPENAI_API_KEY)
 load_dotenv()
@@ -136,75 +139,91 @@ def split_into_chunks(text: str, chunk_size: int, overlap: int, model: str) -> L
     
     return chunks
 
-async def process_chunk(chunk: str, session: aiohttp.ClientSession, 
-                        model: str, max_tokens: int, chunk_number: int, 
-                        total_chunks: int) -> str:
-    """Process a text chunk through the OpenAI API."""
+async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: int, 
+                        total_chunks: int, output_file: str, file_lock) -> int:
+    """Process a text chunk through the OpenAI API and write results to file immediately."""
     prompt = FILTER_PROMPT.format(chunk=chunk)
     
-    # Prepare the API request
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
+    # Create AsyncOpenAI client
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You are a precise filter that keeps only emails showing authentic voice and style."},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": max_tokens,
-        "temperature": 0.1,  # Low temperature for consistent filtering
-    }
-    
-    # Implement retry logic
-    max_retries = 3
-    retry_delay = 5  # seconds
+    # Implement retry logic with increased retries for SSL errors
+    max_retries = 5  # Increased from 3 to 5
+    base_retry_delay = 5  # seconds
     
     for attempt in range(max_retries):
         try:
             print(f"Processing chunk {chunk_number}/{total_chunks}...")
-            async with session.post("https://api.openai.com/v1/chat/completions", 
-                                  headers=headers, json=payload) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    filtered_content = result["choices"][0]["message"]["content"]
-                    print(f"✓ Processed chunk {chunk_number}/{total_chunks}")
-                    return filtered_content
-                else:
-                    error_info = await response.text()
-                    print(f"API error (status {response.status}): {error_info}")
-                    if response.status == 429:  # Rate limit
-                        wait_time = 20 * (attempt + 1)  # Exponential backoff
-                        print(f"Rate limited. Waiting {wait_time} seconds...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        await asyncio.sleep(retry_delay)
+            
+            # Use the official OpenAI client to make the API call
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a precise filter that keeps only emails showing authentic voice and style."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.1  # Low temperature for consistent filtering
+            )
+            
+            filtered_content = response.choices[0].message.content
+            
+            # Write this chunk's results to the output file immediately
+            async with file_lock:
+                with open(output_file, 'a', encoding='utf-8') as f:
+                    f.write(filtered_content + "\n\n")
+            
+            output_tokens = count_tokens(filtered_content, model)
+            print(f"✓ Processed chunk {chunk_number}/{total_chunks} - Tokens: {output_tokens}")
+            return output_tokens
+            
+        except ssl.SSLError as e:
+            # Special handling for SSL errors
+            retry_delay = base_retry_delay * (attempt + 1) * 2  # Longer delay for SSL errors
+            print(f"SSL Error processing chunk {chunk_number}: {str(e)}")
+            print(f"This is likely a temporary network issue. Retrying in {retry_delay} seconds...")
+            await asyncio.sleep(retry_delay)
         except Exception as e:
+            # General exception handling
+            retry_delay = base_retry_delay * (attempt + 1)
             print(f"Error processing chunk {chunk_number}: {str(e)}")
+            print(f"Retrying in {retry_delay} seconds...")
             await asyncio.sleep(retry_delay)
     
     print(f"Failed to process chunk {chunk_number} after {max_retries} attempts")
-    return f"[Processing failed for chunk {chunk_number}]"
-
-async def process_chunks(chunks: List[str], model: str, max_tokens: int) -> str:
-    """Process all chunks in parallel with rate limiting."""
-    # Use connection pool to manage connections
-    conn = aiohttp.TCPConnector(limit=5)  # Limit connections to avoid overwhelming the API
-    timeout = aiohttp.ClientTimeout(total=120)  # 2 minute timeout
     
-    async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-        # Create tasks for each chunk
-        tasks = []
-        for i, chunk in enumerate(chunks):
-            # Add some delay between task creation to avoid rate limits
-            await asyncio.sleep(0.5)
-            tasks.append(process_chunk(chunk, session, model, max_tokens, i+1, len(chunks)))
-        
-        # Process chunks and collect results
-        results = await asyncio.gather(*tasks)
-        return "\n\n".join(results)
+    # Write a failure notice to the output file
+    error_message = f"[Processing failed for chunk {chunk_number}]"
+    async with file_lock:
+        with open(output_file, 'a', encoding='utf-8') as f:
+            f.write(error_message + "\n\n")
+    
+    return 0  # Return 0 tokens for a failed chunk
+
+async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int, output_file: str) -> int:
+    """Process all chunks in parallel with rate limiting and write to file as they complete."""
+    # Initialize output file with empty content
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write("")  # Create or clear the file
+    
+    # Create a lock for file access
+    file_lock = asyncio.Lock()
+    
+    # Create tasks for all chunks at once with some spreading
+    tasks = []
+    for i, chunk in enumerate(chunks):
+        # Add a tiny stagger to avoid exact simultaneous connections
+        await asyncio.sleep(0.1)
+        tasks.append(process_chunk(chunk, model, max_tokens, i+1, len(chunks), output_file, file_lock))
+    
+    # Start all requests simultaneously but with slight staggering
+    print(f"Starting parallel processing of {len(chunks)} chunks...")
+    
+    # Process all chunks and wait for them to complete
+    output_tokens = await asyncio.gather(*tasks, return_exceptions=False)
+    
+    # Return the total number of output tokens
+    return sum(token_count for token_count in output_tokens if isinstance(token_count, int))
 
 async def main():
     """Main function to run the script."""
@@ -220,6 +239,8 @@ async def main():
                        help=f"Token overlap between chunks (default: {DEFAULT_OVERLAP})")
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS,
                        help=f"Maximum tokens for model response (default: {DEFAULT_MAX_TOKENS})")
+    parser.add_argument("--skip-to", type=int, default=0,
+                       help="Skip to a specific chunk number (useful for resuming after errors)")
     
     args = parser.parse_args()
     
@@ -242,21 +263,21 @@ async def main():
     chunks = split_into_chunks(text, args.chunk_size, args.overlap, args.model)
     print(f"Created {len(chunks)} chunks")
     
-    # Process chunks
-    start_time = time.time()
-    print(f"Processing chunks with {args.model}...")
-    filtered_content = await process_chunks(chunks, args.model, args.max_tokens)
+    # Handle skip-to option
+    if args.skip_to > 0 and args.skip_to <= len(chunks):
+        print(f"Skipping to chunk {args.skip_to}/{len(chunks)}")
+        chunks = chunks[args.skip_to-1:]
     
-    # Write output file
-    with open(args.output, 'w', encoding='utf-8') as f:
-        f.write(filtered_content)
+    # Process chunks in parallel and write to file as they complete
+    start_time = time.time()
+    print(f"Processing chunks with {args.model} in parallel...")
+    output_token_count = await process_chunks_parallel(chunks, args.model, args.max_tokens, args.output)
     
     elapsed_time = time.time() - start_time
     print(f"Processing completed in {elapsed_time:.2f} seconds")
     print(f"Filtered content saved to: {args.output}")
     
-    # Calculate token counts
-    output_token_count = count_tokens(filtered_content, args.model)
+    # Calculate token counts and reduction
     reduction = 100 - (output_token_count / token_count * 100)
     print(f"Input tokens: {token_count}, Output tokens: {output_token_count}")
     print(f"Reduced content by {reduction:.2f}%")

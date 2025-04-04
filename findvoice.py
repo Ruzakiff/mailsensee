@@ -35,111 +35,118 @@ DEFAULT_CHUNK_SIZE = 8192  # tokens per chunk
 DEFAULT_OVERLAP = 200      # token overlap between chunks
 DEFAULT_MAX_TOKENS = 4096  # max tokens for completion
 
-# Filter prompt template
+# Filter prompt template - refactored with forensic linguistic focus
 FILTER_PROMPT = """
-You are processing a dataset of sent emails to extract only those that genuinely capture the sender's authentic voice, writing style, and communication patterns. Approach this as a filtering task with clear signal/noise discrimination:
+You are a forensic linguistic analyst extracting authentic voice patterns from an email corpus. Your task requires exceptionally precise discrimination between content that carries strong idiolectal signals and content that lacks distinctive linguistic markers.
 
-## FILTERING CRITERIA - REMOVE:
+## ELIMINATION CRITERIA - REMOVE:
 
-1. EMPTY OR NEAR-EMPTY EMAILS
-   - Emails with no content or only "Attached" or similar minimal text
-   - Single line responses with no substantive content
+1. MINIMAL LINGUISTIC SIGNAL CONTENT
+   - Emails with no substantive linguistic content (e.g., "See attached" messages)
+   - Single-line responses without distinctive lexical or syntactic patterns
+   - Standardized templated responses showing no personalization
 
-2. URL/LINK COLLECTIONS
-   - Lists of URLs or bookmarks with no personal commentary
-   - References to files or attachments without meaningful message content
+2. NON-AUTHORED CONTENT
+   - Lists of URLs, links, or references without authored commentary
+   - Forwarded content where the sender adds minimal original language
+   - Machine-generated text (form responses, automated notifications)
 
-3. NOTES-TO-SELF
-   - Lists that appear to be personal reminders
-   - Fragments of incomplete thoughts or drafts
-   - Repeated/duplicate content with minor variations
+3. FRAGMENTARY OR INCOMPLETE DISCOURSE
+   - Incomplete thought fragments or notes-to-self lacking coherent discourse structure
+   - Lists that don't demonstrate the author's organizational patterns
+   - Duplicative content showing no variation in linguistic approach
 
-4. PURELY TRANSACTIONAL
-   - One-line administrative responses (e.g., "5447 Potter St, Pittsburgh, PA 15232")
-   - Emails that only contain form information
+4. FUNCTIONALLY CONSTRAINED LANGUAGE
+   - Purely transactional language constrained by narrow functional requirements
+   - Messages with such limited context they demonstrate no stylistic choices
+   - Communications so brief they provide no insight into discourse organization
 
-## RETENTION CRITERIA - KEEP:
+## RETENTION CRITERIA - PRESERVE:
 
-1. AUTHENTIC PERSONAL COMMUNICATION
-   - Emails with natural conversational flow
-   - Messages explaining concepts or providing instructions
-   - Emails showing opinion, reasoning, or decision-making
+1. IDIOLECTAL MARKERS
+   - Content with distinctive vocabulary choices, collocations, and lexical patterns
+   - Emails showing characteristic sentence structure, clause complexity, and syntactic preferences
+   - Messages containing the author's distinctive discourse markers and connectors
 
-2. DISTINCTIVE EXPRESSIONS
-   - Content with unique phrasing or vocabulary choices
-   - Messages exhibiting humor, enthusiasm, or other emotional tones
-   - Writing that reflects the sender's thought process
+2. PRAGMATIC & RHETORICAL PATTERNS
+   - Communications demonstrating the author's characteristic persuasive strategies
+   - Content showing how the author adapts tone/register to different audiences
+   - Messages revealing patterns in how the author structures arguments or explanations
 
-3. ADVISORY CONTENT
-   - Emails providing advice, feedback, or recommendations
-   - Messages showing how the sender approaches explaining things
+3. DISCOURSE ORGANIZATION
+   - Emails exhibiting the author's typical topic progression and paragraph structure
+   - Content showing characteristic narrative or expository organization
+   - Messages revealing patterns in how the author initiates, develops, and concludes thoughts
+
+4. CONTEXTUAL ADAPTATION PATTERNS
+   - Content showing how the author responds to different situational demands
+   - Messages demonstrating the author's adaptations across different communication contexts
+   - Emails revealing the author's linguistic choices when addressing different topics
 
 TASK:
-1. Examine each email in this chunk
-2. Output ONLY the complete text of emails that meet the retention criteria (with their headers)
-3. Completely discard emails that should be filtered out
-4. Keep the email format intact for retained emails
+1. Analyze each email using forensic linguistic principles to identify distinctive authorial patterns
+2. Output ONLY the complete text of emails that contain strong idiolectal signals (with their headers)
+3. Completely discard emails that offer minimal stylistic information
+4. Preserve the exact formatting of retained emails
 5. Include NO explanations or commentary in your response, just the filtered content
 
 INPUT CHUNK:
 {chunk}
 """
 
-# Second-stage filter prompt template
+# Second-stage filter prompt - refactored with forensic linguistic focus
 SECOND_STAGE_PROMPT = """
-You are analyzing a corpus of emails to create an optimal dataset for training a generative AI model to mimic the author's writing style with such precision that readers cannot distinguish between AI-generated and authentic emails.
+You are a computational forensic linguist creating a definitive stylistic profile of an author from their email corpus. Your task requires extreme precision in selecting content that maximizes signal-to-noise ratio for authorial attribution algorithms.
 
-Approach this task using Andrej Karpathy's first principles thinking about model training and generalization:
+## FORENSIC LINGUISTIC PRINCIPLES:
 
-## FUNDAMENTAL PRINCIPLES:
+1. IDIOLECTAL DENSITY
+   - Select content with the highest concentration of author-specific linguistic patterns
+   - Prioritize examples showing distinctive lexical choices, collocations, and grammatical constructions
+   - Include content demonstrating the author's characteristic semantic field preferences
 
-1. INFORMATION DENSITY
-   - Each selected example should contribute unique stylistic information
-   - Maximize the bits-per-token ratio by selecting emails that demonstrate clear stylistic patterns
-   - Prioritize emails with distinctive vocabulary, sentence structures, and rhetorical devices
+2. DISTRIBUTIONAL COMPLETENESS
+   - Ensure coverage across the full spectrum of the author's linguistic repertoire
+   - Include samples demonstrating variation in formality, emotional valence, and register
+   - Select examples showing both consistent patterns and contextual adaptations
 
-2. DISTRIBUTIONAL COVERAGE
-   - Ensure the dataset covers the full distribution of the author's linguistic patterns
-   - Include examples across different emotional states (formal, casual, excited, concerned, etc.)
-   - Select examples with varying lengths, structures, and purposes
+3. DISCOURSE ARCHITECTURE
+   - Preserve examples of the author's characteristic paragraph structure and topic development
+   - Include content showing typical rhetorical moves and argumentative patterns
+   - Select emails demonstrating the author's distinctive approaches to different discourse types
 
-3. CONTEXT WINDOW OPTIMIZATION
-   - Select emails that demonstrate how the author adapts tone for different recipients/situations
-   - Include examples that show complete thought patterns and reasoning chains
-   - Preserve emails that demonstrate characteristic opening/closing patterns
+4. PRAGMATIC FINGERPRINTING
+   - Prioritize content revealing how the author adapts language to different social contexts
+   - Include examples showing characteristic patterns of implicature and presupposition
+   - Select content demonstrating the author's typical stance-taking and evaluation strategies
 
-4. PATTERN GENERALIZATION VS. MEMORIZATION
-   - Focus on examples that reveal generalizable patterns rather than one-off anomalies
-   - Avoid highly specialized content unless it demonstrates a core stylistic element
-   - Identify and include "archetype emails" that the author produces repeatedly with variations
+## SELECTION METHODOLOGY:
 
-## FILTERING METHODOLOGY:
+1. STYLOMETRIC CLUSTERING
+   - Group texts by measurable stylistic features (sentence length, complexity, vocabulary richness)
+   - Select optimal representatives from each stylistic cluster
+   - Prioritize examples with the clearest demonstration of the author's linguistic habits
 
-1. CLUSTERING & SELECTION
-   - Group stylistically similar emails and select representative examples from each cluster
-   - For each type of email (informational, persuasive, personal, etc.), include diverse examples
-   - When two emails demonstrate the same stylistic feature, keep the clearer/stronger example
+2. FEATURE EXTRACTION OPTIMIZATION
+   - Select content that maximizes the number of distinctive linguistic features captured
+   - Include samples that would contribute most to a computational linguistic profile
+   - Prioritize content showing patterns that would be statistically significant in attribution
 
-2. INFORMATION GAIN RANKING
-   - Prioritize emails that contain unique phrases, idioms, or syntactic structures
-   - Evaluate each email's contribution to the overall stylistic fingerprint
-   - Keep emails that demonstrate the author's distinctive approaches to common situations
+3. COMPARATIVE DISTINCTIVENESS
+   - Select examples showing the most author-specific patterns (vs. general population patterns)
+   - Include content demonstrating idiosyncratic linguistic choices
+   - Prioritize emails with features that would have high discriminative value in authorship attribution
 
-3. REDUNDANCY ELIMINATION
-   - Remove examples that don't add new information about the author's style
-   - When similar emails exist, keep ones with the clearest demonstrations of style
-   - Eliminate emails that follow generic templates unless they contain personal modifications
-
-4. HIGHER-ORDER EFFECTS AWARENESS
-   - Ensure the final dataset represents the author's best communication practices
+4. PATTERN REINFORCEMENT
+   - Select examples that reinforce identifiable linguistic patterns without redundancy
+   - Include content that demonstrates consistent authorial habits across different contexts
+   - Prioritize emails that would strengthen confidence intervals in stylometric analysis
 
 TASK:
-1. Examine each email in this corpus
-2. Output ONLY the complete text of the most valuable emails that meet the criteria above
-3. Completely discard emails that are redundant or don't add new stylistic information
-4. Keep the email format intact for retained emails
-5. Include NO explanations or commentary in your response, just the filtered content
-6. IMPORTANT: The output must be under 4000 tokens total
+1. Apply forensic linguistic principles to select only the most informative examples from this corpus
+2. Output ONLY the complete text of emails with the highest stylometric value
+3. Include NO explanations or commentary in your response, just the filtered content
+4. IMPORTANT: The output must be under 4000 tokens total
 
 INPUT CONTENT:
 {filtered_content}
@@ -355,7 +362,7 @@ async def process_single_second_stage_chunk(content: str, model: str, max_tokens
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=max_tokens,
-                temperature=0.1  # Low temperature for consistent filtering
+                temperature=0  # Low temperature for consistent filtering
             )
             
             optimized_content = response.choices[0].message.content

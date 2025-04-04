@@ -85,6 +85,66 @@ INPUT CHUNK:
 {chunk}
 """
 
+# Second-stage filter prompt template
+SECOND_STAGE_PROMPT = """
+You are analyzing a corpus of emails to create an optimal dataset for training a generative AI model to mimic the author's writing style with such precision that readers cannot distinguish between AI-generated and authentic emails.
+
+Approach this task using Andrej Karpathy's first principles thinking about model training and generalization:
+
+## FUNDAMENTAL PRINCIPLES:
+
+1. INFORMATION DENSITY
+   - Each selected example should contribute unique stylistic information
+   - Maximize the bits-per-token ratio by selecting emails that demonstrate clear stylistic patterns
+   - Prioritize emails with distinctive vocabulary, sentence structures, and rhetorical devices
+
+2. DISTRIBUTIONAL COVERAGE
+   - Ensure the dataset covers the full distribution of the author's linguistic patterns
+   - Include examples across different emotional states (formal, casual, excited, concerned, etc.)
+   - Select examples with varying lengths, structures, and purposes
+
+3. CONTEXT WINDOW OPTIMIZATION
+   - Select emails that demonstrate how the author adapts tone for different recipients/situations
+   - Include examples that show complete thought patterns and reasoning chains
+   - Preserve emails that demonstrate characteristic opening/closing patterns
+
+4. PATTERN GENERALIZATION VS. MEMORIZATION
+   - Focus on examples that reveal generalizable patterns rather than one-off anomalies
+   - Avoid highly specialized content unless it demonstrates a core stylistic element
+   - Identify and include "archetype emails" that the author produces repeatedly with variations
+
+## FILTERING METHODOLOGY:
+
+1. CLUSTERING & SELECTION
+   - Group stylistically similar emails and select representative examples from each cluster
+   - For each type of email (informational, persuasive, personal, etc.), include diverse examples
+   - When two emails demonstrate the same stylistic feature, keep the clearer/stronger example
+
+2. INFORMATION GAIN RANKING
+   - Prioritize emails that contain unique phrases, idioms, or syntactic structures
+   - Evaluate each email's contribution to the overall stylistic fingerprint
+   - Keep emails that demonstrate the author's distinctive approaches to common situations
+
+3. REDUNDANCY ELIMINATION
+   - Remove examples that don't add new information about the author's style
+   - When similar emails exist, keep ones with the clearest demonstrations of style
+   - Eliminate emails that follow generic templates unless they contain personal modifications
+
+4. HIGHER-ORDER EFFECTS AWARENESS
+   - Ensure the final dataset represents the author's best communication practices
+
+TASK:
+1. Examine each email in this corpus
+2. Output ONLY the complete text of the most valuable emails that meet the criteria above
+3. Completely discard emails that are redundant or don't add new stylistic information
+4. Keep the email format intact for retained emails
+5. Include NO explanations or commentary in your response, just the filtered content
+6. IMPORTANT: The output must be under 4000 tokens total
+
+INPUT CONTENT:
+{filtered_content}
+"""
+
 def get_encoder(model: str) -> tiktoken.Encoding:
     """Get the appropriate tokenizer for the specified model."""
     try:
@@ -163,7 +223,7 @@ async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: i
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=max_tokens,
-                temperature=0.1  # Low temperature for consistent filtering
+                temperature=0  # Low temperature for consistent filtering
             )
             
             filtered_content = response.choices[0].message.content
@@ -200,7 +260,122 @@ async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: i
     
     return 0  # Return 0 tokens for a failed chunk
 
-async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int, output_file: str) -> int:
+async def apply_second_stage_filter(content: str, model: str, max_tokens: int, target_tokens: int = 4000) -> str:
+    """Apply a second-stage filter to further reduce content to under target_tokens."""
+    content_tokens = count_tokens(content, model)
+    if content_tokens <= target_tokens:
+        print(f"Content already under {target_tokens} tokens, skipping second-stage filter")
+        return content
+    
+    print(f"Applying second-stage filter to reduce content from {content_tokens} tokens to under {target_tokens} tokens...")
+    
+    # If content is too large for context window, we need to chunk it again
+    model_max_tokens = 120000  # Conservative estimate for model's max context length
+    prompt_template_tokens = count_tokens(SECOND_STAGE_PROMPT.format(filtered_content=""), model)
+    available_tokens = model_max_tokens - prompt_template_tokens - 1000  # Extra buffer
+    
+    if content_tokens > available_tokens:
+        print(f"Content too large ({content_tokens} tokens) for second-stage filtering in one pass")
+        print(f"Splitting into smaller chunks for incremental processing...")
+        
+        # Extract individual emails from the content
+        email_pattern = r"(Email ID: [^\n]+\nDate: [^\n]+\nTo: [^\n]+\nSubject: [^\n]+\nYour Content:[\s\S]+?={80})"
+        emails = re.findall(email_pattern, content)
+        
+        if not emails:
+            print("Warning: Couldn't identify individual emails in the content. Using basic chunking.")
+            # If we can't identify emails, use simple chunking by tokens
+            encoder = get_encoder(model)
+            tokens = encoder.encode(content)
+            
+            chunks = []
+            chunk_size = available_tokens
+            for i in range(0, len(tokens), chunk_size):
+                chunk_tokens = tokens[i:i + chunk_size]
+                chunks.append(encoder.decode(chunk_tokens))
+        else:
+            print(f"Identified {len(emails)} individual emails for incremental processing")
+            chunks = [emails[i:i+50] for i in range(0, len(emails), 50)]
+            chunks = ["\n\n".join(chunk_emails) for chunk_emails in chunks]
+        
+        # Process each chunk with the second stage filter and combine results
+        combined_result = ""
+        for i, chunk in enumerate(chunks):
+            print(f"Processing chunk {i+1}/{len(chunks)} for second-stage filtering...")
+            # Calculate proportional token target for this chunk
+            proportional_target = max(int(target_tokens/len(chunks)), 1000)
+            chunk_result = await process_single_second_stage_chunk(chunk, model, max_tokens, proportional_target)
+            combined_result += chunk_result + "\n\n"
+            
+            # Monitor total tokens
+            current_tokens = count_tokens(combined_result, model)
+            print(f"Current total tokens after chunk {i+1}: {current_tokens}/{target_tokens}")
+            
+            # Stop if we've reached or exceeded target
+            if current_tokens >= target_tokens:
+                print(f"Reached target token count, stopping incremental processing")
+                break
+        
+        # Final pass to ensure we meet target token count
+        final_tokens = count_tokens(combined_result, model)
+        if final_tokens > target_tokens:
+            print(f"Final result ({final_tokens} tokens) exceeds target ({target_tokens}). Running final optimization pass...")
+            # If still over target, do one final filtering pass on the combined result
+            if final_tokens < available_tokens:
+                combined_result = await process_single_second_stage_chunk(combined_result, model, max_tokens, target_tokens)
+            else:
+                # If too large, truncate to roughly target tokens
+                print("Content still too large for final pass, truncating to target token count...")
+                encoder = get_encoder(model)
+                tokens = encoder.encode(combined_result)
+                combined_result = encoder.decode(tokens[:target_tokens])
+        
+        return combined_result
+    
+    # If content fits in context window, process normally with second stage filter
+    return await process_single_second_stage_chunk(content, model, max_tokens, target_tokens)
+
+async def process_single_second_stage_chunk(content: str, model: str, max_tokens: int, target_tokens: int) -> str:
+    """Process a single chunk through the second-stage filter."""
+    # Update the prompt to specify the target token count for this chunk
+    prompt = SECOND_STAGE_PROMPT.format(filtered_content=content)
+    
+    # Create AsyncOpenAI client
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    
+    max_retries = 5
+    base_retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": f"You are an expert dataset curator focusing on stylistic signal optimization. Your task is to filter content to under {target_tokens} tokens while preserving the most valuable stylistic examples."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.1  # Low temperature for consistent filtering
+            )
+            
+            optimized_content = response.choices[0].message.content
+            token_count = count_tokens(optimized_content, model)
+            
+            print(f"Second-stage filtering complete for chunk. Tokens: {token_count}/{target_tokens}")
+            
+            return optimized_content
+            
+        except Exception as e:
+            retry_delay = base_retry_delay * (attempt + 1)
+            print(f"Error in second-stage filtering: {str(e)}")
+            print(f"Retrying in {retry_delay} seconds...")
+            await asyncio.sleep(retry_delay)
+    
+    print(f"Failed to apply second-stage filter after {max_retries} attempts")
+    return ""  # Return empty string if filtering fails completely
+
+async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int, output_file: str, 
+                                 apply_second_filter: bool = False) -> int:
     """Process all chunks in parallel with rate limiting and write to file as they complete."""
     # Initialize output file with empty content
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -222,8 +397,33 @@ async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int
     # Process all chunks and wait for them to complete
     output_tokens = await asyncio.gather(*tasks, return_exceptions=False)
     
-    # Return the total number of output tokens
-    return sum(token_count for token_count in output_tokens if isinstance(token_count, int))
+    # Return the total number of output tokens from first-stage filtering
+    first_stage_tokens = sum(token_count for token_count in output_tokens if isinstance(token_count, int))
+    print(f"First-stage filtering complete. Total tokens: {first_stage_tokens}")
+    
+    # Apply second-stage filtering if requested
+    if apply_second_filter:
+        # Read the first-stage output
+        with open(output_file, 'r', encoding='utf-8') as f:
+            first_stage_content = f.read()
+        
+        print(f"Applying second-stage filter to first-stage output ({first_stage_tokens} tokens)...")
+        
+        # Apply second-stage filter
+        optimized_content = await apply_second_stage_filter(first_stage_content, model, max_tokens)
+        optimized_tokens = count_tokens(optimized_content, model)
+        
+        # Save the optimized content to a new file
+        optimized_file = output_file.replace('.txt', '_optimized.txt')
+        with open(optimized_file, 'w', encoding='utf-8') as f:
+            f.write(optimized_content)
+        
+        print(f"Optimized content saved to: {optimized_file} ({optimized_tokens} tokens)")
+        
+        # Return the token count of the second-stage output
+        return optimized_tokens
+    
+    return first_stage_tokens
 
 async def main():
     """Main function to run the script."""
@@ -241,6 +441,10 @@ async def main():
                        help=f"Maximum tokens for model response (default: {DEFAULT_MAX_TOKENS})")
     parser.add_argument("--skip-to", type=int, default=0,
                        help="Skip to a specific chunk number (useful for resuming after errors)")
+    parser.add_argument("--optimize", "-opt", action="store_true",
+                       help="Apply second-stage optimization to reduce to under 4000 tokens")
+    parser.add_argument("--target-tokens", type=int, default=4000,
+                       help="Target token count for second-stage optimization (default: 4000)")
     
     args = parser.parse_args()
     
@@ -271,11 +475,16 @@ async def main():
     # Process chunks in parallel and write to file as they complete
     start_time = time.time()
     print(f"Processing chunks with {args.model} in parallel...")
-    output_token_count = await process_chunks_parallel(chunks, args.model, args.max_tokens, args.output)
+    output_token_count = await process_chunks_parallel(
+        chunks, args.model, args.max_tokens, args.output, args.optimize)
     
     elapsed_time = time.time() - start_time
     print(f"Processing completed in {elapsed_time:.2f} seconds")
-    print(f"Filtered content saved to: {args.output}")
+    
+    if args.optimize:
+        print(f"Final optimized content saved to: {args.output.replace('.txt', '_optimized.txt')}")
+    else:
+        print(f"Filtered content saved to: {args.output}")
     
     # Calculate token counts and reduction
     reduction = 100 - (output_token_count / token_count * 100)

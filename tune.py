@@ -33,88 +33,12 @@ DEFAULT_OVERLAP = 200      # token overlap between chunks
 DEFAULT_MAX_TOKENS = 4096  # max tokens for completion
 
 # The prompt for extracting distinctive voice content
-DISTINCTIVE_PROMPT = """
-You are analyzing a corpus of emails to create an optimal dataset for training a generative AI model to mimic the author's writing style with such precision that readers cannot distinguish between AI-generated and authentic emails.
-
-Approach this task using Andrej Karpathy's first principles thinking about model training and generalization:
-
-## FUNDAMENTAL PRINCIPLES:
-
-1. INFORMATION DENSITY
-   - Each selected example should contribute unique stylistic information
-   - Maximize the bits-per-token ratio by selecting emails that demonstrate clear stylistic patterns
-   - Prioritize emails with distinctive vocabulary, sentence structures, and rhetorical devices
-
-2. DISTRIBUTIONAL COVERAGE
-   - Ensure the dataset covers the full distribution of the author's linguistic patterns
-   - Include examples across different emotional states (formal, casual, excited, concerned, etc.)
-   - Select examples with varying lengths, structures, and purposes
-
-3. CONTEXT WINDOW OPTIMIZATION
-   - Select emails that demonstrate how the author adapts tone for different recipients/situations
-   - Include examples that show complete thought patterns and reasoning chains
-   - Preserve emails that demonstrate characteristic opening/closing patterns
-
-4. PATTERN GENERALIZATION VS. MEMORIZATION
-   - Focus on examples that reveal generalizable patterns rather than one-off anomalies
-   - Avoid highly specialized content unless it demonstrates a core stylistic element
-   - Identify and include "archetype emails" that the author produces repeatedly with variations
-
-## FILTERING METHODOLOGY:
-
-1. CLUSTERING & SELECTION
-   - Group stylistically similar emails and select representative examples from each cluster
-   - For each type of email (informational, persuasive, personal, etc.), include diverse examples
-   - When two emails demonstrate the same stylistic feature, keep the clearer/stronger example
-
-2. INFORMATION GAIN RANKING
-   - Prioritize emails that contain unique phrases, idioms, or syntactic structures
-   - Evaluate each email's contribution to the overall stylistic fingerprint
-   - Keep emails that demonstrate the author's distinctive approaches to common situations
-
-3. REDUNDANCY ELIMINATION
-   - Remove examples that don't add new information about the author's style
-   - When similar emails exist, keep ones with the clearest demonstrations of style
-   - Eliminate emails that follow generic templates unless they contain personal modifications
-
-4. HIGHER-ORDER EFFECTS AWARENESS
-   - Ensure the final dataset represents the author's best communication practices
-
-IMPLEMENTATION INSTRUCTIONS: 
-1. Process the entire corpus to identify key stylistic elements
-2. Apply clustering to group emails by type, recipient relationship, and purpose
-3. Select representative examples ensuring maximum diversity with minimum redundancy
-4. Aim for 30-40% of the original corpus size while preserving 90%+ of stylistic information
-
-## OUTPUT FORMAT:
-Your output must be valid JSON following this exact structure:
-
-{{
-  "methodology": {{
-    "clustering": "Brief description of clustering approach",
-    "information_gain": "Brief description of information ranking approach",
-    "redundancy_elimination": "Brief description of redundancy elimination approach",
-    "higher_order_effects": "Brief description of higher-order considerations"
-  }},
-  "selected_emails": [
-    {{
-      "id": "<email_identifier>",
-      "style_notes": "Description of style elements (e.g., formal tone with complex structures)"
-    }},
-    ... more emails ...
-  ],
-  "summary_stats": {{
-    "total_analyzed": <number>,
-    "total_selected": <number>,
-    "selection_percentage": <number>
-  }}
-}}
-
-Your output should contain ONLY a valid JSON object with the optimal subset of emails that would enable a model to generate authentic-seeming communications indistinguishable from the original author.
-
+DISTINCTIVE_PROMPT = """i just want the raw text email content no formatting no headers no metadata, just whatever text content is in email bodys
 INPUT CORPUS:
 {chunk}
 """
+
+
 
 def get_encoder(model: str) -> tiktoken.Encoding:
     """Get the appropriate tokenizer for the specified model."""
@@ -213,7 +137,7 @@ async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: i
             response = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You extract only the most distinctive and unique writing samples. Format your response as valid JSON."},
+                    {"role": "system", "content": "You clean email metadata to only the raw body text Format your response as valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=max_tokens,
@@ -294,8 +218,8 @@ async def main():
     parser = argparse.ArgumentParser(description="Extract distinctive voice content from filtered emails")
     parser.add_argument("input_file", nargs="?", default="filtered_voice_emails.txt",
                       help="Path to the filtered email corpus (default: filtered_voice_emails.txt)")
-    parser.add_argument("--output", "-o", default="distinctive_voice_emails.json", 
-                       help="Output file path (default: distinctive_voice_emails.json)")
+    parser.add_argument("--output", "-o", default="distinctive_voice_emails.txt", 
+                       help="Output file path (default: distinctive_voice_emails.txt)")
     parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
                        help=f"OpenAI model to use (default: {DEFAULT_MODEL})")
     parser.add_argument("--chunk-size", "-c", type=int, default=DEFAULT_CHUNK_SIZE,

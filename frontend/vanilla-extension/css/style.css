@@ -1,0 +1,104 @@
+/* styles.css - Styles for Gmail integration */
+
+/* MailSense toolbar */
+.mailsense-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  
+  .mailsense-button {
+    background-color: #f0f7ff;
+    border: 1px solid #c2e0ff;
+    border-radius: 4px;
+    color: #0366d6;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 12px;
+    transition: all 0.2s;
+  }
+  
+  .mailsense-button:hover {
+    background-color: #daeeff;
+    border-color: #79b8ff;
+  }
+  
+  /* Dropdown menu */
+  .mailsense-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  
+  .mailsense-dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #fff;
+    min-width: 160px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    border-radius: 4px;
+    border: 1px solid #eee;
+    z-index: 1000;
+  }
+  
+  .mailsense-dropdown:hover .mailsense-dropdown-content {
+    display: block;
+  }
+  
+  .mailsense-dropdown-content a {
+    color: #444;
+    padding: 10px 14px;
+    text-decoration: none;
+    display: block;
+    font-size: 13px;
+  }
+  
+  .mailsense-dropdown-content a:hover {
+    background-color: #f7f7f7;
+  }
+  
+  /* Loading indicator */
+  .mailsense-loader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    margin: 8px 0;
+  }
+  
+  .mailsense-spinner {
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    animation: mailsense-spin 1s linear infinite;
+  }
+  
+  @keyframes mailsense-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  /* Notifications */
+  .mailsense-notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: #333;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 4px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    z-index: 10000;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s ease;
+  }
+  
+  .mailsense-notification.show {
+    transform: translateY(0);
+    opacity: 1;
+  }

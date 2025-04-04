@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MailSense</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="mailsense-popup">
+    <div class="mailsense-header">
+      <img src="icons/icon48.png" alt="MailSense Logo" class="mailsense-logo">
+      <h1>MailSense</h1>
+    </div>
+    
+    <div id="auth-section" class="mailsense-section">
+      <p id="auth-status">Checking authentication status...</p>
+      <button id="auth-button" disabled>Sign in with Google</button>
+    </div>
+    
+    <div id="status-section" class="mailsense-section hidden">
+      <h2>Status</h2>
+      <div class="status-item">
+        <span class="status-label">Authentication:</span>
+        <span id="auth-indicator" class="status-value status-pending">Pending</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Email History:</span>
+        <span id="history-indicator" class="status-value status-pending">Pending</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Voice Analysis:</span>
+        <span id="voice-indicator" class="status-value status-pending">Pending</span>
+      </div>
+    </div>
+    
+    <div id="actions-section" class="mailsense-section hidden">
+      <h2>Actions</h2>
+      <button id="fetch-history-button" disabled>Fetch Email History</button>
+      <button id="analyze-voice-button" disabled>Analyze Writing Style</button>
+      <button id="setup-complete-button" disabled>Setup Complete</button>
+    </div>
+    
+    <div id="complete-section" class="mailsense-section hidden">
+      <h2>Ready to Use</h2>
+      <p>MailSense is now ready to use with Gmail. Open Gmail and look for the MailSense buttons when composing emails.</p>
+    </div>
+    
+    <div class="mailsense-footer">
+      <a href="#" id="help-link">Help</a>
+      <a href="#" id="settings-link">Settings</a>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

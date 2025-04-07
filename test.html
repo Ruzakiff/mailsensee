@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>OAuth Test</title>
+  <style>
+    body { font-family: Arial; margin: 20px; }
+    button { padding: 10px; margin: 5px; }
+    pre { background: #f0f0f0; padding: 10px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h1>OAuth Test Page</h1>
+  
+  <div>
+    <h2>1. Authenticate</h2>
+    <button id="auth-btn">Start Authentication</button>
+  </div>
+  
+  <div>
+    <h2>2. Check Status</h2>
+    <button id="status-btn">Check Auth Status</button>
+  </div>
+  
+  <div>
+    <h2>3. Fetch History</h2>
+    <button id="fetch-btn">Fetch Email History</button>
+  </div>
+  
+  <div>
+    <h2>4. Analyze Voice</h2>
+    <button id="analyze-btn">Analyze Voice</button>
+  </div>
+  
+  <div>
+    <h2>5. Generate Content</h2>
+    <button id="generate-btn">Generate Content</button>
+  </div>
+  
+  <h3>Results:</h3>
+  <pre id="result">Click a button to test API endpoints...</pre>
+  
+  <script>
+    // Store user ID
+    let userId = localStorage.getItem('testUserId') || `test_user_${Date.now()}`;
+    localStorage.setItem('testUserId', userId);
+    
+    // API base URL
+    const API_URL = 'http://localhost:5000/api';
+    
+    // Update results
+    function showResult(data) {
+      document.getElementById('result').textContent = 
+        typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    }
+    
+    // Authentication
+    document.getElementById('auth-btn').addEventListener('click', async () => {
+      try {
+        showResult('Starting authentication...');
+        
+        const response = await fetch(`${API_URL}/authenticate`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId})
+        });
+        
+        const data = await response.json();
+        showResult(data);
+        
+        if (data.success && data.auth_url) {
+          // Open auth URL in new window
+          window.open(data.auth_url, 'oauth_window', 'width=800,height=600');
+        }
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Check status
+    document.getElementById('status-btn').addEventListener('click', async () => {
+      try {
+        showResult('Checking authentication status...');
+        
+        const response = await fetch(`${API_URL}/auth-status?user_id=${userId}`);
+        const data = await response.json();
+        
+        showResult(data);
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Fetch history
+    document.getElementById('fetch-btn').addEventListener('click', async () => {
+      try {
+        showResult('Fetching email history...');
+        
+        const response = await fetch(`${API_URL}/fetch-history`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            user_id: userId,
+            after_date: '2020/01/01',
+            before_date: '2023/01/01'
+          })
+        });
+        
+        const data = await response.json();
+        showResult(data);
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Analyze voice
+    document.getElementById('analyze-btn').addEventListener('click', async () => {
+      try {
+        showResult('Analyzing voice...');
+        
+        const response = await fetch(`${API_URL}/analyze-voice`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId})
+        });
+        
+        const data = await response.json();
+        showResult(data);
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Generate content
+    document.getElementById('generate-btn').addEventListener('click', async () => {
+      try {
+        showResult('Generating content...');
+        
+        const response = await fetch(`${API_URL}/generate-content`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            user_id: userId,
+            prompt: 'Write a professional email explaining a project delay',
+            genre: 'email',
+            tone: 'professional',
+            recipient: 'manager',
+            length: 200
+          })
+        });
+        
+        const data = await response.json();
+        showResult(data);
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Show user ID on load
+    showResult(`Test User ID: ${userId}\nReady to test API endpoints.`);
+  </script>
+</body>
+</html>

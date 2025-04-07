@@ -1,12 +1,39 @@
 from googleapiclient.discovery import build
 from .auth import get_credentials
+import os
+import pickle
+from google.auth.transport.requests import Request
+
+def get_user_credentials(user_id='default'):
+    """Get credentials for a specific user."""
+    # Path to the user's token file
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "user_data")
+    tokens_dir = os.path.join(data_dir, 'tokens')
+    token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
+    
+    if not os.path.exists(token_path):
+        raise Exception(f"No credentials found for user {user_id}")
+    
+    with open(token_path, 'rb') as token:
+        creds = pickle.load(token)
+    
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            with open(token_path, 'wb') as token:
+                pickle.dump(creds, token)
+        else:
+            raise Exception(f"Invalid credentials for user {user_id}")
+    
+    return creds
 
 class GmailClient:
     """Client to interact with Gmail API."""
     
-    def __init__(self):
+    def __init__(self, user_id='default'):
         """Initialize the Gmail API client."""
-        creds = get_credentials()
+        self.user_id = user_id
+        creds = get_user_credentials(user_id)
         self.service = build('gmail', 'v1', credentials=creds)
     
     def get_emails(self, label="SENT", max_results=10):

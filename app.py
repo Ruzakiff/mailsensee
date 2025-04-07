@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect, session, url_for
 from flask_cors import CORS
 import os
 import json
@@ -9,6 +9,11 @@ import importlib.util
 import sys
 import requests
 import asyncio
+import secrets
+import pickle
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+import urllib.parse
 
 # Load environment variables
 load_dotenv()
@@ -33,14 +38,161 @@ CORS(app)  # Enable CORS for Chrome extension
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Add this to your Flask app initialization
+app.secret_key = secrets.token_hex(16)  # For session management
+
+# Store pending auth requests
+auth_requests = {}
+
 @app.route('/api/authenticate', methods=['POST'])
 def authenticate():
-    """Trigger the OAuth flow and return success status"""
+    """Start OAuth flow with proper redirects"""
     try:
-        credentials = get_credentials()
-        return jsonify({"success": True, "message": "Authentication successful"})
+        # Get or create user_id
+        data = request.json
+        user_id = data.get('user_id')
+        
+        # If no user_id provided, create one
+        if not user_id:
+            user_id = f"user_{secrets.token_hex(8)}"
+        
+        # Create a state token to prevent CSRF
+        state = secrets.token_hex(16)
+        
+        # Get client secrets file
+        import glob
+        client_secret_files = glob.glob("client_secret*.json")
+        if not client_secret_files:
+            return jsonify({"success": False, "message": "No client secrets file found"}), 400
+        
+        client_secrets_file = client_secret_files[0]
+        
+        # Read client_id from client secrets file
+        with open(client_secrets_file, 'r') as f:
+            client_info = json.load(f)
+            client_id = client_info['installed']['client_id']
+        
+        # Create the authorization URL
+        SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+        redirect_uri = url_for('oauth_callback', _external=True)
+        
+        # Store user_id with auth request
+        auth_requests[state] = {
+            'client_secrets_file': client_secrets_file, 
+            'return_url': request.headers.get('Referer'),
+            'user_id': user_id
+        }
+        
+        # Build authorization URL
+        params = {
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+            'scope': ' '.join(SCOPES),
+            'response_type': 'code',
+            'state': state,
+            'access_type': 'offline',
+            'prompt': 'consent'
+        }
+        
+        auth_url = f"https://accounts.google.com/o/oauth2/auth?{urllib.parse.urlencode(params)}"
+        
+        # Return the URL - extension will open this in a new tab
+        return jsonify({"success": True, "auth_url": auth_url, "user_id": user_id})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
+
+# Add a callback endpoint for OAuth
+@app.route('/oauth2callback')
+def oauth_callback():
+    """Handle OAuth callback and exchange code for token"""
+    error = request.args.get('error')
+    if error:
+        return f"Error: {error}"
+    
+    state = request.args.get('state')
+    if not state or state not in auth_requests:
+        return "Invalid state parameter"
+    
+    auth_info = auth_requests.pop(state)
+    code = request.args.get('code')
+    user_id = auth_info.get('user_id', 'default')
+    
+    try:
+        # Create tokens directory if it doesn't exist
+        tokens_dir = os.path.join(DATA_DIR, 'tokens')
+        os.makedirs(tokens_dir, exist_ok=True)
+        
+        # Create Flow instance with client secrets file
+        flow = Flow.from_client_secrets_file(
+            auth_info['client_secrets_file'],
+            scopes=['https://www.googleapis.com/auth/gmail.readonly'],
+            redirect_uri=url_for('oauth_callback', _external=True)
+        )
+        
+        # Exchange code for credentials
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        
+        # Save the credentials for this specific user
+        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
+        with open(token_path, 'wb') as token:
+            pickle.dump(credentials, token)
+        
+        # Return success page with auto-close script
+        return """
+        <html>
+        <head>
+            <title>Authentication Successful</title>
+            <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }
+                .success { color: green; }
+                .container { max-width: 600px; margin: 0 auto; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1 class="success">Authentication Successful!</h1>
+                <p>You can now close this window and return to the extension.</p>
+            </div>
+            <script>
+                // Send message to extension that auth is complete
+                setTimeout(function() {
+                    window.close();
+                }, 3000);
+            </script>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        return f"Error exchanging code: {str(e)}"
+
+# Add an endpoint to check auth status
+@app.route('/api/auth-status', methods=['GET'])
+def auth_status():
+    """Check if user is authenticated"""
+    try:
+        user_id = request.args.get('user_id', 'default')
+        tokens_dir = os.path.join(DATA_DIR, 'tokens')
+        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
+        
+        if os.path.exists(token_path):
+            with open(token_path, 'rb') as token:
+                creds = pickle.load(token)
+                
+            if creds and creds.valid:
+                return jsonify({"authenticated": True})
+            elif creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    with open(token_path, 'wb') as token:
+                        pickle.dump(creds, token)
+                    return jsonify({"authenticated": True})
+                except:
+                    pass
+                    
+        return jsonify({"authenticated": False})
+    except Exception as e:
+        return jsonify({"authenticated": False, "error": str(e)})
 
 @app.route('/api/fetch-history', methods=['POST'])
 def fetch_history():
@@ -52,6 +204,37 @@ def fetch_history():
         after_date = data.get('after_date', '2014/01/01')
         before_date = data.get('before_date', '2022/01/01')
         
+        # Get user's credentials
+        tokens_dir = os.path.join(DATA_DIR, 'tokens')
+        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
+        
+        if not os.path.exists(token_path):
+            return jsonify({
+                "success": False,
+                "message": f"User not authenticated. Please authenticate first."
+            }), 401
+        
+        # Load credentials
+        with open(token_path, 'rb') as token:
+            creds = pickle.load(token)
+            
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    with open(token_path, 'wb') as token:
+                        pickle.dump(creds, token)
+                except:
+                    return jsonify({
+                        "success": False,
+                        "message": "Credentials expired and couldn't be refreshed."
+                    }), 401
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid credentials. Please authenticate again."
+                }), 401
+        
         # Create user directory
         user_dir = os.path.join(DATA_DIR, user_id)
         os.makedirs(user_dir, exist_ok=True)
@@ -60,33 +243,8 @@ def fetch_history():
         output_file = os.path.join(user_dir, "sent_emails.txt")
         progress_file = os.path.join(user_dir, "email_fetch_progress.txt")
         
-        # For testing purposes, let's create a sample file with some content
-        # This will simulate what gmail_history.main() would do
-        # In production, you'd use the real gmail_history module
-        with open(output_file, 'w') as f:
-            f.write("Email ID: test_id_123\n")
-            f.write("Date: Mon, 15 Aug 2022 10:30:45 -0700\n")
-            f.write("To: recipient@example.com\n")
-            f.write("Subject: Test Email Subject\n")
-            f.write("Your Content:\n")
-            f.write("This is a test email content created for testing purposes.\n")
-            f.write("It simulates what would be fetched from the Gmail API.\n")
-            f.write("Feel free to add more content as needed for testing.\n")
-            f.write("\n" + "="*80 + "\n\n")
-            
-            # Add a few more sample emails
-            f.write("Email ID: test_id_456\n")
-            f.write("Date: Tue, 16 Aug 2022 14:20:10 -0700\n")
-            f.write("To: manager@example.com\n")
-            f.write("Subject: Project Update\n")
-            f.write("Your Content:\n")
-            f.write("Here's the latest update on our project:\n\n")
-            f.write("We've completed the first phase ahead of schedule.\n")
-            f.write("The team has been working efficiently despite some challenges.\n")
-            f.write("I'd like to discuss next steps in our meeting tomorrow.\n")
-            f.write("\n" + "="*80 + "\n\n")
-        
-        print(f"Created sample email file at {output_file} for testing")
+        # For testing purposes, create a sample file...
+        # In production, you would use the gmail_history module with the user's credentials
         
         return jsonify({
             "success": True, 

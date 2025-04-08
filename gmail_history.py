@@ -37,8 +37,8 @@ def extract_your_content(body, email_date):
     lines = body.split('\n')
     your_content = []
     
-    # Common patterns for quoted content
-    quoted_patterns = [
+    # Common patterns for quoted content start
+    quoted_start_patterns = [
         r'^On .+ wrote:$',           # Standard Gmail quote format
         r'^>.+',                     # Line starting with >
         r'^From: ',                  # Quoted headers
@@ -49,23 +49,52 @@ def extract_your_content(body, email_date):
         r'^-+Original Message-+',    # Forwarded message markers
         r'^-+Forwarded message-+',
         r'^_+',                      # Horizontal rule markers
-        r'--',                       # Signature markers
     ]
     
-    # Combine patterns
-    combined_pattern = '|'.join(f'({p})' for p in quoted_patterns)
+    # Signature markers - these typically end the user's content
+    signature_patterns = [
+        r'^--\s*$',                  # Standard signature marker
+        r'^__+\s*$',                 # Underscores as signature marker
+        r'^-+\s*$',                  # Dashes as signature marker
+        r'^Regards,\s*$',            # Common signature starter
+        r'^Best,\s*$',               # Common signature starter
+        r'^Thanks,\s*$',             # Common signature starter
+        r'^Thank you,\s*$',          # Common signature starter
+        r'^Sincerely,\s*$',          # Common signature starter
+        r'^Cheers,\s*$',             # Common signature starter
+    ]
+    
+    # Combine start patterns
+    start_pattern = '|'.join(f'({p})' for p in quoted_start_patterns)
+    
+    # Combine signature patterns
+    sig_pattern = '|'.join(f'({p})' for p in signature_patterns)
     
     in_quote = False
+    reached_signature = False
+    
     for line in lines:
+        line_stripped = line.strip()
+        
         # Check if this line starts a quote
-        if re.match(combined_pattern, line.strip()):
+        if re.match(start_pattern, line_stripped):
             in_quote = True
             continue
         
-        # If we're not in a quote, add the line
-        if not in_quote:
+        # Check if this line is likely a signature marker
+        if not in_quote and your_content and re.match(sig_pattern, line_stripped):
+            reached_signature = True
+        
+        # Special case: if we see a pattern like "On [date], [name] <[email]> wrote:",
+        # everything after that is a quoted reply
+        if re.match(r'^On .+, .+ wrote:$', line_stripped):
+            in_quote = True
+            continue
+        
+        # If we're not in a quote and haven't reached signature, add the line
+        if not in_quote and not reached_signature:
             # Skip empty lines at the start
-            if not your_content and not line.strip():
+            if not your_content and not line_stripped:
                 continue
             your_content.append(line)
     
@@ -73,7 +102,15 @@ def extract_your_content(body, email_date):
     if not your_content and lines:
         return body
     
-    return '\n'.join(your_content)
+    # Join the lines back together
+    result = '\n'.join(your_content)
+    
+    # Remove common automatic signatures that might not be caught by markers
+    result = re.sub(r'\n+Sent from my iPhone\s*$', '', result)
+    result = re.sub(r'\n+Sent from my Android\s*$', '', result)
+    result = re.sub(r'\n+Get Outlook for (iOS|Android)\s*$', '', result)
+    
+    return result.strip()
 
 def main():
     # Create the Gmail client

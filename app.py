@@ -196,13 +196,14 @@ def auth_status():
 
 @app.route('/api/fetch-history', methods=['POST'])
 def fetch_history():
-    """Fetch Gmail history for the authenticated user"""
+    """Fetch Gmail history for the authenticated user, extracting only content they wrote"""
     try:
         # Get parameters from request
         data = request.json
         user_id = data.get('user_id', 'default')
         after_date = data.get('after_date', '2014/01/01')
         before_date = data.get('before_date', '2022/01/01')
+        email_limit = data.get('email_limit', 1000)  # Default limit of 1000 emails
         
         # Get user's credentials
         tokens_dir = os.path.join(DATA_DIR, 'tokens')
@@ -243,13 +244,162 @@ def fetch_history():
         output_file = os.path.join(user_dir, "sent_emails.txt")
         progress_file = os.path.join(user_dir, "email_fetch_progress.txt")
         
-        # For testing purposes, create a sample file...
-        # In production, you would use the gmail_history module with the user's credentials
+        # Set up parameters for Gmail query
+        client = gmail_history.GmailClient(user_id=user_id)
+        query = f"in:sent after:{after_date.replace('/', '/')} before:{before_date.replace('/', '/')}"
+        
+        print(f"Fetching emails for user {user_id} with query: {query} (limit: {email_limit} emails)")
+        
+        # Initialize or load progress tracking
+        processed_ids = set()
+        if os.path.exists(progress_file):
+            with open(progress_file, 'r') as f:
+                processed_ids = set(line.strip() for line in f if line.strip())
+            print(f"Resuming from previous run, {len(processed_ids)} emails already processed.")
+        
+        # Open the output file in append mode
+        with open(output_file, 'a', encoding='utf-8') as out_file:
+            # Track our progress
+            page_token = None
+            total_fetched = 0
+            actual_processed = 0
+            limit_reached = False
+            
+            # Loop to handle pagination
+            while True:
+                # Check if we've reached the limit
+                if total_fetched >= email_limit:
+                    print(f"Reached email processing limit of {email_limit}")
+                    limit_reached = True
+                    break
+                
+                # Fetch a batch of emails
+                try:
+                    results = client.service.users().messages().list(
+                        userId='me',
+                        q=query,
+                        maxResults=min(100, email_limit - total_fetched),  # Don't fetch more than we need
+                        pageToken=page_token
+                    ).execute()
+                except Exception as e:
+                    print(f"Error fetching messages: {e}")
+                    return jsonify({"success": False, "message": f"Error fetching messages: {str(e)}"}), 400
+                
+                messages = results.get('messages', [])
+                if not messages:
+                    break
+                    
+                batch_size = len(messages)
+                print(f"Processing batch of {batch_size} emails...")
+                
+                # Process each message
+                for i, message in enumerate(messages):
+                    # Check if we've reached the limit
+                    if total_fetched >= email_limit:
+                        print(f"Reached email processing limit of {email_limit} during batch")
+                        limit_reached = True
+                        break
+                        
+                    total_fetched += 1
+                    msg_id = message['id']
+                    
+                    # Skip if already processed
+                    if msg_id in processed_ids:
+                        continue
+                    
+                    try:
+                        # Get full message details
+                        msg = client.service.users().messages().get(
+                            userId='me', id=msg_id, format='full'
+                        ).execute()
+                        
+                        # Extract email details
+                        headers = msg['payload']['headers']
+                        subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
+                        to = next((h['value'] for h in headers if h['name'].lower() == 'to'), 'Unknown')
+                        date = next((h['value'] for h in headers if h['name'].lower() == 'date'), 'Unknown')
+                        
+                        # Extract body
+                        body = ""
+                        if 'parts' in msg['payload']:
+                            for part in msg['payload']['parts']:
+                                if part['mimeType'] == 'text/plain':
+                                    body = gmail_history.decode_body(part['body'].get('data', ''))
+                                    break
+                                elif part['mimeType'] == 'text/html' and not body:
+                                    body = gmail_history.clean_html(gmail_history.decode_body(part['body'].get('data', '')))
+                        elif 'body' in msg['payload'] and 'data' in msg['payload']['body']:
+                            body = gmail_history.decode_body(msg['payload']['body'].get('data', ''))
+                        
+                        # Extract only the user's original content
+                        your_content = gmail_history.extract_your_content(body, date)
+                        
+                        # Skip emails with empty content after extraction
+                        if not your_content.strip():
+                            print(f"Skipping email with no original content: {msg_id}")
+                            # Mark as processed to avoid reprocessing
+                            with open(progress_file, 'a') as prog:
+                                prog.write(f"{msg_id}\n")
+                            processed_ids.add(msg_id)
+                            continue
+                        
+                        # Write to file immediately
+                        out_file.write(f"Email ID: {msg_id}\n")
+                        out_file.write(f"Date: {date}\n")
+                        out_file.write(f"To: {to}\n")
+                        out_file.write(f"Subject: {subject}\n")
+                        out_file.write("Your Content:\n")
+                        out_file.write(your_content)
+                        out_file.write("\n" + "="*80 + "\n\n")
+                        
+                        # Flush to ensure it's written to disk
+                        out_file.flush()
+                        
+                        # Mark as processed
+                        with open(progress_file, 'a') as prog:
+                            prog.write(f"{msg_id}\n")
+                        
+                        processed_ids.add(msg_id)
+                        actual_processed += 1
+                        
+                        # Progress update
+                        if (i + 1) % 10 == 0:
+                            print(f"  Processed {i + 1}/{batch_size} in current batch, saved {actual_processed} emails")
+                        
+                    except Exception as e:
+                        print(f"Error processing message {msg_id}: {e}")
+                    
+                    # Sleep briefly to avoid hitting rate limits
+                    time.sleep(0.05)
+                
+                # Check if limit was reached during batch processing
+                if limit_reached:
+                    break
+                
+                print(f"Batch complete. Total processed: {total_fetched}, saved: {actual_processed} with user content.")
+                
+                # Check if there are more pages
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break
+        
+        # Add stats about the extraction
+        with open(os.path.join(user_dir, "email_extraction_stats.txt"), 'w') as stats_file:
+            stats_file.write(f"Total emails fetched: {total_fetched}\n")
+            stats_file.write(f"Emails with user content extracted: {actual_processed}\n")
+            stats_file.write(f"Extraction date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            stats_file.write(f"Limit reached: {limit_reached}\n")
+            stats_file.write(f"Email limit: {email_limit}\n")
+        
+        limit_message = " (reached configured limit)" if limit_reached else ""
         
         return jsonify({
             "success": True, 
-            "message": "Email history fetched successfully",
-            "output_file": output_file
+            "message": f"Email history fetched successfully. Found {total_fetched} emails{limit_message}, saved {actual_processed} with user-authored content.",
+            "output_file": output_file,
+            "emails_processed": total_fetched,
+            "emails_with_content": actual_processed,
+            "limit_reached": limit_reached
         })
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
@@ -273,16 +423,38 @@ def analyze_voice():
                 "message": f"Input file not found: {input_file}. Please run fetch-history first."
             }), 400
         
-        # Changed: Call main properly, based on how it's defined in findvoice.py
+        # Setup findvoice arguments
         old_argv = sys.argv.copy()
+        
+        # Configure arguments for findvoice.main()
         sys.argv = [
             'findvoice.py',
             input_file,
             '--output', output_file,
-            '--optimize'
+            '--model', data.get('model', 'gpt-4o'),
+            '--optimize'  # Enable optimization for better results
         ]
-        asyncio.run(findvoice.main())
+        
+        # Add optional parameters if provided
+        if data.get('chunk_size'):
+            sys.argv.extend(['--chunk-size', str(data.get('chunk_size'))])
+        
+        if data.get('target_tokens'):
+            sys.argv.extend(['--target-tokens', str(data.get('target_tokens'))])
+        
+        print(f"Running voice analysis with args: {sys.argv}")
+        
+        # Run the findvoice main function
+        result = asyncio.run(findvoice.main())
+        
+        # Restore original argv
         sys.argv = old_argv
+        
+        if result != 0:
+            return jsonify({
+                "success": False,
+                "message": f"Voice analysis failed with error code {result}"
+            }), 400
         
         return jsonify({
             "success": True, 
@@ -304,6 +476,7 @@ def generate_content():
         tone = data.get('tone', 'professional')
         recipient = data.get('recipient', 'colleague')
         length = data.get('length', 300)
+        model = data.get('model', 'gpt-4o')
         
         # Set file paths
         user_dir = os.path.join(DATA_DIR, user_id)
@@ -311,39 +484,23 @@ def generate_content():
         
         # Check if examples file exists
         if not os.path.exists(examples_file):
-            # For testing: Create a dummy examples file with minimal content
-            os.makedirs(os.path.dirname(examples_file), exist_ok=True)
-            with open(examples_file, 'w') as f:
-                f.write("This is a sample email to use for testing.\n\n")
-                f.write("I hope this helps with the testing process.\n\n")
-                f.write("Let me know if you need anything else.\n\n")
-            
-            print(f"Created dummy examples file at {examples_file} for testing")
+            return jsonify({
+                "success": False,
+                "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
+            }), 400
         
-        # For testing, we can either call the real generate function or use a mock
-        # Here's a simple mock implementation
-        mock_response = (
-            "Subject: Update on Project Timeline\n\n"
-            "I wanted to provide an update regarding the timeline for our current project. Unfortunately, we are experiencing a delay.\n\n"
-            "The team has encountered some unforeseen challenges that have impacted our original schedule. We are actively working to address these issues and are committed to minimizing any further delays.\n\n"
-            "I hope this helps with understanding the current situation. We are doing everything we can to get back on track as soon as possible.\n\n"
-            "Let me know if you have any questions or need further information.\n\n"
-            "Thank you for your understanding and support."
+        # Call the generate function
+        generated_text = generate.generate_matching_text(
+            examples_file=examples_file,
+            model=model,
+            max_tokens=2000,  # Reasonable default
+            genre=genre,
+            topic=topic,
+            tone=tone,
+            recipient=recipient,
+            length=length,
+            free_form_prompt=prompt if prompt else None
         )
-        
-        # Uncomment this to use the real generate module
-        # generated_text = generate.generate_matching_text(
-        #     examples_file=examples_file,
-        #     free_form_prompt=prompt if prompt else None,
-        #     genre=genre,
-        #     topic=topic,
-        #     tone=tone,
-        #     recipient=recipient,
-        #     length=length
-        # )
-        
-        # For testing, use the mock response
-        generated_text = mock_response
         
         return jsonify({
             "success": True,

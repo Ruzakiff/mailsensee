@@ -3,14 +3,24 @@
 // Constants
 const API_URL = 'http://localhost:5000/api';
 
-// Current state with default userId
+// Extended userState with profile information
 let userState = {
   userId: 'user_' + Date.now(),
   authenticated: false,
   emailsFetched: false,
   voiceAnalyzed: false,
   setupComplete: false,
-  lastError: null
+  lastError: null,
+  profile: {
+    name: '',
+    role: '',
+    company: '',
+    industry: '',
+    additionalContext: '',
+    completed: false,
+    reminderDismissed: false,
+    lastUpdated: null
+  }
 };
 
 // Track authentication status
@@ -73,6 +83,21 @@ async function loadState() {
             if (!result.userState.userId) {
               result.userState.userId = 'user_' + Date.now();
             }
+            
+            // Ensure profile object exists with all fields
+            if (!result.userState.profile) {
+              result.userState.profile = {
+                name: '',
+                role: '',
+                company: '',
+                industry: '',
+                additionalContext: '',
+                completed: false,
+                reminderDismissed: false,
+                lastUpdated: null
+              };
+            }
+            
             userState = result.userState;
             log('State loaded', userState);
           } else {
@@ -133,6 +158,23 @@ function updateUI() {
       
       // Update button states
       updateButtonStates();
+      
+      // Update profile indicators
+      updateProfileIndicators();
+      
+      // Only show profile reminder once per session if needed
+      // and only if it hasn't been shown already
+      if (userState.authenticated && 
+          !userState.profile.completed && 
+          !userState.profile.reminderDismissed && 
+          !window.profileReminderShown) {
+        
+        // Set a flag to prevent showing multiple times
+        window.profileReminderShown = true;
+        
+        // Show after a short delay
+        setTimeout(showProfileReminder, 2000);
+      }
     }
     
     // Show any errors
@@ -581,6 +623,16 @@ function setupEventListeners() {
       }
     }
   });
+  
+  // Add profile view button event listener
+  document.getElementById('profile-button').addEventListener('click', showProfileView);
+  document.getElementById('quick-profile-link').addEventListener('click', showProfileView);
+  document.getElementById('save-profile-button').addEventListener('click', saveProfile);
+  document.getElementById('cancel-profile-button').addEventListener('click', hideProfileView);
+  
+  // Profile reminder buttons
+  document.getElementById('complete-profile-button').addEventListener('click', showProfileView);
+  document.getElementById('remind-later-button').addEventListener('click', dismissProfileReminder);
 }
 
 // Initialize the extension
@@ -671,6 +723,11 @@ async function initialize() {
     // Set flag for initialization check
     window.mailSenseInitialized = true;
     
+    // Check if we should remind about profile completion
+    if (userState.authenticated && !userState.profile.completed && !userState.profile.reminderDismissed) {
+      setTimeout(showProfileReminder, 2000); // Show after 2 seconds to not overwhelm
+    }
+    
     log('Initialization complete');
   } catch (error) {
     console.error('Initialization failed:', error);
@@ -680,3 +737,191 @@ async function initialize() {
 
 // Start the extension when DOM is ready
 document.addEventListener('DOMContentLoaded', initialize);
+
+// Show the profile view
+function showProfileView() {
+  // Hide all other sections
+  document.querySelectorAll('.mailsense-section').forEach(section => {
+    section.classList.add('hidden');
+  });
+  
+  // Show profile section
+  const profileSection = document.getElementById('profile-section');
+  profileSection.classList.remove('hidden');
+  
+  // Fill in existing profile data if any
+  if (userState.profile) {
+    document.getElementById('profile-name').value = userState.profile.name || '';
+    document.getElementById('profile-role').value = userState.profile.role || '';
+    document.getElementById('profile-company').value = userState.profile.company || '';
+    document.getElementById('profile-industry').value = userState.profile.industry || '';
+    document.getElementById('profile-context').value = userState.profile.additionalContext || '';
+  }
+  
+  // Hide any profile reminder
+  hideProfileReminder();
+}
+
+// Hide the profile view and return to appropriate section
+function hideProfileView() {
+  // Hide profile section
+  document.getElementById('profile-section').classList.add('hidden');
+  
+  // Show the appropriate section based on user state
+  updateSectionVisibility();
+}
+
+// Save profile information
+function saveProfile() {
+  userState.profile = {
+    name: document.getElementById('profile-name').value,
+    role: document.getElementById('profile-role').value,
+    company: document.getElementById('profile-company').value,
+    industry: document.getElementById('profile-industry').value,
+    additionalContext: document.getElementById('profile-context').value,
+    completed: true,
+    reminderDismissed: true,
+    lastUpdated: new Date().toISOString()
+  };
+  
+  // Check if profile is sufficiently completed
+  const requiredFields = ['name', 'role', 'company'];
+  const isComplete = requiredFields.every(field => userState.profile[field]?.trim().length > 0);
+  userState.profile.completed = isComplete;
+  
+  saveState().then(() => {
+    log('Profile saved', userState.profile);
+    
+    // Show a success message
+    showMessage('Profile saved successfully!');
+    
+    // Return to previous view
+    hideProfileView();
+    
+    // Update UI elements that might depend on profile status
+    updateProfileIndicators();
+  });
+}
+
+// Properly dismiss the profile reminder
+function dismissProfileReminder() {
+  log('Dismissing profile reminder');
+  
+  // Update state
+  userState.profile.reminderDismissed = true;
+  
+  // Save to persist dismissal
+  saveState().then(() => {
+    // Hide the reminder
+    hideProfileReminder();
+    
+    // Log confirmation
+    log('Profile reminder dismissed and state saved');
+  });
+}
+
+// Hide profile reminder toast
+function hideProfileReminder() {
+  const reminder = document.getElementById('profile-reminder');
+  if (reminder) {
+    reminder.classList.add('hidden');
+    log('Profile reminder hidden');
+    
+    // Force reminder to be hidden with inline style as well
+    reminder.style.display = 'none';
+  }
+}
+
+// Show profile reminder toast with proper controls
+function showProfileReminder() {
+  // Only show if authenticated, profile incomplete, and not dismissed
+  if (userState.authenticated && 
+      !userState.profile.completed && 
+      !userState.profile.reminderDismissed) {
+    
+    log('Showing profile reminder');
+    const reminder = document.getElementById('profile-reminder');
+    
+    // Reset any inline styles
+    reminder.style.display = '';
+    reminder.classList.remove('hidden');
+    
+    // Ensure buttons have event listeners
+    document.getElementById('remind-later-button').addEventListener('click', dismissProfileReminder);
+    document.getElementById('complete-profile-button').addEventListener('click', showProfileView);
+    
+    // Auto-hide after 10 seconds and mark as dismissed
+    setTimeout(() => {
+      if (!reminder.classList.contains('hidden')) {
+        log('Auto-dismissing profile reminder after timeout');
+        dismissProfileReminder();
+      }
+    }, 10000);
+  }
+}
+
+// Update UI elements that indicate profile status
+function updateProfileIndicators() {
+  const profileLink = document.getElementById('quick-profile-link');
+  
+  if (!userState.profile.completed) {
+    profileLink.classList.add('needs-attention');
+  } else {
+    profileLink.classList.remove('needs-attention');
+  }
+}
+
+// Show temporary message
+function showMessage(message, isError = false) {
+  const messageEl = document.createElement('div');
+  messageEl.className = `message-toast ${isError ? 'error' : 'success'}`;
+  messageEl.textContent = message;
+  
+  document.body.appendChild(messageEl);
+  
+  setTimeout(() => {
+    messageEl.classList.add('show');
+    setTimeout(() => {
+      messageEl.classList.remove('show');
+      setTimeout(() => {
+        document.body.removeChild(messageEl);
+      }, 300); // Wait for fade out animation
+    }, 3000); // Show for 3 seconds
+  }, 10); // Small delay for the DOM to update
+}
+
+// Get complete user context for AI generation
+function getUserContext() {
+  return {
+    name: userState.profile.name || undefined,
+    role: userState.profile.role || undefined,
+    company: userState.profile.company || undefined,
+    industry: userState.profile.industry || undefined,
+    additionalContext: userState.profile.additionalContext || undefined,
+    // Add other useful context for AI here
+    emailStyle: userState.voiceAnalyzed ? "Analyzed from your previous emails" : "Default style"
+  };
+}
+
+// Generate content using user's context
+async function generateContent(prompt) {
+  try {
+    const context = getUserContext();
+    
+    // Call API with context
+    const response = await fetch(`${API_URL}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userState.userId,
+        prompt: prompt,
+        context: context
+      })
+    });
+    
+    return await response.json();
+  } catch (error) {
+    log('Error generating content', error);
+    return { error: 'Failed to generate content' };
+  }
+}

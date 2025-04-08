@@ -10,6 +10,14 @@
     <div class="mailsense-header">
       <img src="icons/icon48.png" alt="MailSense Logo" class="mailsense-logo">
       <h1>MailSense</h1>
+      <div class="header-actions">
+        <button id="profile-button" class="icon-button" title="Your Profile">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </button>
+      </div>
     </div>
     
     <div class="setup-progress">
@@ -31,6 +39,46 @@
       <div class="progress-step" data-step="complete">
         <div class="step-circle">4</div>
         <div class="step-label">Ready</div>
+      </div>
+    </div>
+    
+    <!-- New Profile Section -->
+    <div id="profile-section" class="mailsense-section hidden">
+      <div class="section-header">
+        <h2>Your Profile</h2>
+        <p class="section-description">Help us personalize MailSense by sharing a bit about yourself. This information improves AI-generated content.</p>
+      </div>
+      
+      <div class="profile-form">
+        <div class="form-group">
+          <label for="profile-name">Full Name</label>
+          <input type="text" id="profile-name" placeholder="John Smith">
+        </div>
+        
+        <div class="form-group">
+          <label for="profile-role">Job Title/Role</label>
+          <input type="text" id="profile-role" placeholder="Marketing Manager">
+        </div>
+        
+        <div class="form-group">
+          <label for="profile-company">Company/Organization</label>
+          <input type="text" id="profile-company" placeholder="Acme Inc.">
+        </div>
+        
+        <div class="form-group">
+          <label for="profile-industry">Industry</label>
+          <input type="text" id="profile-industry" placeholder="Technology">
+        </div>
+        
+        <div class="form-group">
+          <label for="profile-context">Additional Context</label>
+          <textarea id="profile-context" placeholder="Share other details that might help in generating relevant content (e.g., I frequently write to clients about project updates)"></textarea>
+        </div>
+      </div>
+      
+      <div class="form-actions">
+        <button id="save-profile-button">Save Profile</button>
+        <button id="cancel-profile-button" class="secondary-button">Cancel</button>
       </div>
     </div>
     
@@ -104,6 +152,7 @@
     <div class="mailsense-footer">
       <a href="#" id="help-link">Help</a>
       <a href="#" id="settings-link">Settings</a>
+      <a href="#" id="quick-profile-link">My Profile</a>
     </div>
     
     <!-- Debugging Section -->
@@ -112,6 +161,19 @@
       <div id="debug-info">Loading...</div>
       <button id="debug-reset">Reset Extension State</button>
     </details>
+  </div>
+  
+  <!-- Profile completion reminder that shows briefly after login -->
+  <div id="profile-reminder" class="reminder-toast hidden">
+    <div class="reminder-content">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+      <span>Complete your profile for better personalization</span>
+    </div>
+    <button id="remind-later-button" class="reminder-button">Later</button>
+    <button id="complete-profile-button" class="reminder-button primary">Complete</button>
   </div>
   
   <!-- Main script -->

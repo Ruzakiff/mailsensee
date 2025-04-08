@@ -1,0 +1,46 @@
+/* MailSense Content Styles */
+
+.mailsense-buttons {
+  margin-right: 10px;
+}
+
+.mailsense-generate-btn,
+.mailsense-refine-btn {
+  background: #4285f4;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 12px;
+  margin-right: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  transition: background-color 0.2s;
+}
+
+.mailsense-generate-btn:hover,
+.mailsense-refine-btn:hover {
+  background: #1a73e8;
+}
+
+.mailsense-generate-btn img,
+.mailsense-refine-btn img {
+  height: 16px;
+  margin-right: 4px;
+}
+
+/* Spinner animation */
+@keyframes mailsense-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.mailsense-spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #4285f4;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: mailsense-spin 1s linear infinite;
+} 

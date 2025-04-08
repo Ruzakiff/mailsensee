@@ -35,6 +35,23 @@
     
     <div id="actions-section" class="mailsense-section hidden">
       <h2>Actions</h2>
+      
+      <!-- Email History Controls -->
+      <div class="action-controls">
+        <div class="control-group">
+          <label for="after-date">After Date:</label>
+          <input type="text" id="after-date" value="2019/01/01" placeholder="YYYY/MM/DD">
+        </div>
+        <div class="control-group">
+          <label for="before-date">Before Date:</label>
+          <input type="text" id="before-date" value="2023/01/01" placeholder="YYYY/MM/DD">
+        </div>
+        <div class="control-group">
+          <label for="email-limit">Email Limit:</label>
+          <input type="text" id="email-limit" value="1000" placeholder="Max emails">
+        </div>
+      </div>
+      
       <button id="fetch-history-button" disabled>Fetch Email History</button>
       <button id="analyze-voice-button" disabled>Analyze Writing Style</button>
       <button id="setup-complete-button" disabled>Setup Complete</button>
@@ -43,14 +60,42 @@
     <div id="complete-section" class="mailsense-section hidden">
       <h2>Ready to Use</h2>
       <p>MailSense is now ready to use with Gmail. Open Gmail and look for the MailSense buttons when composing emails.</p>
+      
+      <!-- Test Generation UI -->
+      <div id="test-generation" class="test-section">
+        <h3>Test Content Generation</h3>
+        <textarea id="prompt-input" placeholder="Write a professional email explaining a project delay..."></textarea>
+        <button id="generate-test-button">Generate Sample</button>
+        <div id="generation-result" class="result-area hidden">
+          <h4>Generated Content:</h4>
+          <pre id="generated-text"></pre>
+          
+          <div class="refinement-controls">
+            <h4>Refine Content:</h4>
+            <textarea id="refinement-input" placeholder="Make it more concise and add a scheduling suggestion..."></textarea>
+            <button id="refine-button">Refine Content</button>
+          </div>
+        </div>
+      </div>
     </div>
     
     <div class="mailsense-footer">
       <a href="#" id="help-link">Help</a>
       <a href="#" id="settings-link">Settings</a>
     </div>
+    
+    <!-- Debugging Section -->
+    <details id="debug-panel">
+      <summary>Debug Info</summary>
+      <div id="debug-info">Loading...</div>
+      <button id="debug-reset">Reset Extension State</button>
+    </details>
   </div>
   
-  <script src="popup.js"></script>
+  <!-- Main script -->
+  <script src="js/popup.js"></script>
+  
+  <!-- Separated fallback script with no inline code -->
+  <script src="js/fallback.js"></script>
 </body>
 </html>

@@ -3,37 +3,118 @@
 <head>
   <title>OAuth Test</title>
   <style>
-    body { font-family: Arial; margin: 20px; }
-    button { padding: 10px; margin: 5px; }
-    pre { background: #f0f0f0; padding: 10px; border-radius: 5px; }
+    body { font-family: Arial; margin: 20px; max-width: 1000px; margin: 0 auto; }
+    button { padding: 10px; margin: 5px; cursor: pointer; }
+    pre { background: #f0f0f0; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    textarea { width: 100%; padding: 10px; margin: 5px 0; min-height: 100px; }
+    .section { border: 1px solid #ddd; padding: 15px; margin: 20px 0; border-radius: 5px; }
+    .hidden { display: none; }
+    h2 { margin-top: 0; }
+    label { display: block; margin: 10px 0 5px; }
+    input[type="text"] { width: 100%; padding: 8px; margin: 5px 0; }
+    .field-group { margin-bottom: 10px; }
+    .input-row { display: flex; gap: 10px; }
+    .input-row input { flex: 1; }
   </style>
 </head>
 <body>
   <h1>OAuth Test Page</h1>
   
-  <div>
+  <div class="section">
     <h2>1. Authenticate</h2>
     <button id="auth-btn">Start Authentication</button>
   </div>
   
-  <div>
+  <div class="section">
     <h2>2. Check Status</h2>
     <button id="status-btn">Check Auth Status</button>
   </div>
   
-  <div>
+  <div class="section">
     <h2>3. Fetch History</h2>
+    <p>Retrieves emails and extracts only the content you wrote (not replies/forwarded content).</p>
+    <div class="field-group">
+      <div class="input-row">
+        <div>
+          <label for="after-date">After Date:</label>
+          <input type="text" id="after-date" value="2019/01/01" placeholder="YYYY/MM/DD">
+        </div>
+        <div>
+          <label for="before-date">Before Date:</label>
+          <input type="text" id="before-date" value="2023/01/01" placeholder="YYYY/MM/DD">
+        </div>
+        <div>
+          <label for="email-limit">Email Limit:</label>
+          <input type="text" id="email-limit" value="1000" placeholder="Max emails to process">
+        </div>
+      </div>
+    </div>
     <button id="fetch-btn">Fetch Email History</button>
   </div>
   
-  <div>
+  <div class="section">
     <h2>4. Analyze Voice</h2>
+    <p>Analyzes your emails to extract your authentic writing style.</p>
     <button id="analyze-btn">Analyze Voice</button>
   </div>
   
-  <div>
+  <div class="section">
     <h2>5. Generate Content</h2>
+    <p>Creates new content that matches your writing style based on the analysis.</p>
+    
+    <div class="field-group">
+      <label for="prompt"><strong>Prompt:</strong> (primary method - describe what you want to write)</label>
+      <textarea id="prompt" placeholder="Write a professional email explaining a project delay due to technical issues..."></textarea>
+    </div>
+    
+    <div class="field-group">
+      <details>
+        <summary>Advanced Options (used only if no prompt provided)</summary>
+        <div class="input-row">
+          <div>
+            <label for="genre">Genre:</label>
+            <input type="text" id="genre" value="email" placeholder="email, message, etc.">
+          </div>
+          <div>
+            <label for="topic">Topic:</label>
+            <input type="text" id="topic" value="project update" placeholder="topic">
+          </div>
+        </div>
+        <div class="input-row">
+          <div>
+            <label for="tone">Tone:</label>
+            <input type="text" id="tone" value="professional" placeholder="professional, casual, etc.">
+          </div>
+          <div>
+            <label for="recipient">Recipient:</label>
+            <input type="text" id="recipient" value="manager" placeholder="manager, team, client, etc.">
+          </div>
+          <div>
+            <label for="length">Length:</label>
+            <input type="text" id="length" value="200" placeholder="word count">
+          </div>
+        </div>
+      </details>
+    </div>
+    
     <button id="generate-btn">Generate Content</button>
+  </div>
+  
+  <div class="section hidden" id="refine-section">
+    <h2>6. Refine Content</h2>
+    <p>Refine the generated content while preserving your writing style.</p>
+    
+    <div class="field-group">
+      <label for="original-text">Original Text:</label>
+      <textarea id="original-text" placeholder="Copy the generated text you want to refine here..."></textarea>
+    </div>
+    
+    <div class="field-group">
+      <label for="refinement">Refinement Instructions:</label>
+      <textarea id="refinement" placeholder="Make it more concise and add a mention of scheduling a follow-up meeting..."></textarea>
+    </div>
+    
+    <button id="refine-btn">Refine Content</button>
   </div>
   
   <h3>Results:</h3>
@@ -51,6 +132,12 @@
     function showResult(data) {
       document.getElementById('result').textContent = 
         typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        
+      // Show refine section when we have generated content
+      if (data && data.success && data.generated_text) {
+        document.getElementById('refine-section').classList.remove('hidden');
+        document.getElementById('original-text').value = data.generated_text;
+      }
     }
     
     // Authentication
@@ -95,13 +182,18 @@
       try {
         showResult('Fetching email history...');
         
+        const afterDate = document.getElementById('after-date').value;
+        const beforeDate = document.getElementById('before-date').value;
+        const emailLimit = parseInt(document.getElementById('email-limit').value) || 1000;
+        
         const response = await fetch(`${API_URL}/fetch-history`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             user_id: userId,
-            after_date: '2020/01/01',
-            before_date: '2023/01/01'
+            after_date: afterDate,
+            before_date: beforeDate,
+            email_limit: emailLimit
           })
         });
         
@@ -135,16 +227,69 @@
       try {
         showResult('Generating content...');
         
+        // Get values from form
+        const prompt = document.getElementById('prompt').value;
+        const genre = document.getElementById('genre').value;
+        const topic = document.getElementById('topic').value;
+        const tone = document.getElementById('tone').value;
+        const recipient = document.getElementById('recipient').value;
+        const length = parseInt(document.getElementById('length').value) || 200;
+        
+        // Build request body - prioritize prompt if available
+        const requestBody = {
+          user_id: userId,
+          length: length
+        };
+        
+        // Add prompt if available (primary method)
+        if (prompt.trim()) {
+          requestBody.prompt = prompt;
+        } else {
+          // Otherwise use structured parameters
+          requestBody.genre = genre;
+          requestBody.topic = topic;
+          requestBody.tone = tone;
+          requestBody.recipient = recipient;
+        }
+        
         const response = await fetch(`${API_URL}/generate-content`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        showResult(data);
+      } catch (error) {
+        showResult(`Error: ${error.message}`);
+      }
+    });
+    
+    // Refine content
+    document.getElementById('refine-btn').addEventListener('click', async () => {
+      try {
+        showResult('Refining content...');
+        
+        const originalText = document.getElementById('original-text').value;
+        const refinement = document.getElementById('refinement').value;
+        
+        if (!originalText.trim()) {
+          showResult('Error: Original text is required for refinement.');
+          return;
+        }
+        
+        if (!refinement.trim()) {
+          showResult('Error: Refinement instructions are required.');
+          return;
+        }
+        
+        const response = await fetch(`${API_URL}/refine-content`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             user_id: userId,
-            prompt: 'Write a professional email explaining a project delay',
-            genre: 'email',
-            tone: 'professional',
-            recipient: 'manager',
-            length: 200
+            original_text: originalText,
+            refinement: refinement
           })
         });
         

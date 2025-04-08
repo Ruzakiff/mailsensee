@@ -1,220 +1,211 @@
-// background.js - Handles authentication, API calls, and notifications
+// MailSense background script - handles authentication and background tasks
 
-// Configuration
-const API_BASE_URL = 'http://localhost:5000/api';
-const CLIENT_ID = 'YOUR_CLIENT_ID'; // From Google Cloud Console
-const REDIRECT_URI = chrome.identity.getRedirectURL();
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'];
+// API base URL
+const API_URL = 'http://localhost:5000/api';
 
-// State management
-let authToken = null;
-let userProfile = null;
+// Global tracking of auth check intervals
+const authCheckIntervalIds = {};
 
-// Initialize extension
-chrome.runtime.onInstalled.addListener(async () => {
-  console.log('MailSense extension installed');
-  
-  // Check if we have a stored token
-  const storedAuth = await chrome.storage.local.get(['authToken', 'userProfile']);
-  if (storedAuth.authToken) {
-    authToken = storedAuth.authToken;
-    userProfile = storedAuth.userProfile;
-    console.log('Loaded existing authentication');
-  }
-  
-  // Set up alarm for periodic checks (e.g., for new emails)
-  chrome.alarms.create('checkMailPeriodically', { periodInMinutes: 15 });
-});
+// Log for extension events
+function log(message, data = null) {
+  console.log(`MailSense BG: ${message}`, data || '');
+}
 
-// Handle authentication
-async function authenticate() {
+// Check API auth status
+async function checkAuthStatus(userId) {
   try {
-    // OAuth flow using chrome.identity
-    const authUrl = new URL('https://accounts.google.com/o/oauth2/auth');
-    authUrl.searchParams.set('client_id', CLIENT_ID);
-    authUrl.searchParams.set('response_type', 'token');
-    authUrl.searchParams.set('redirect_uri', REDIRECT_URI);
-    authUrl.searchParams.set('scope', SCOPES.join(' '));
-    
-    const responseUrl = await chrome.identity.launchWebAuthFlow({
-      url: authUrl.toString(),
-      interactive: true
-    });
-    
-    // Parse the access token from the response
-    const url = new URL(responseUrl);
-    const params = new URLSearchParams(url.hash.substring(1));
-    authToken = params.get('access_token');
-    
-    // Store the token
-    await chrome.storage.local.set({ authToken });
-    
-    // Get user profile
-    const userInfo = await fetchUserProfile(authToken);
-    userProfile = userInfo;
-    await chrome.storage.local.set({ userProfile });
-    
-    // Tell our backend server we're authenticated
-    await sendAuthToBackend();
-    
-    return { success: true };
+    const url = `${API_URL}/auth-status?user_id=${userId}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    return data;
   } catch (error) {
-    console.error('Authentication error:', error);
-    return { success: false, error };
+    log('Auth check error:', error);
+    return { authenticated: false };
   }
 }
 
-// Fetch user profile information
-async function fetchUserProfile(token) {
-  const response = await fetch('https://www.googleapis.com/gmail/v1/users/me/profile', {
-    headers: { Authorization: `Bearer ${token}` }
+// Initialize on install
+chrome.runtime.onInstalled.addListener(() => {
+  log('Extension installed or updated');
+  
+  // Initialize state if needed
+  chrome.storage.local.get('userState', (result) => {
+    if (!result.userState) {
+      const userState = {
+        userId: 'user_' + Date.now(),
+        authenticated: false,
+        emailsFetched: false,
+        voiceAnalyzed: false,
+        setupComplete: false
+      };
+      
+      chrome.storage.local.set({ userState });
+      log('Initial state created', userState);
+    }
   });
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch user profile');
-  }
-  
-  return response.json();
-}
-
-// Send auth token to our backend service
-async function sendAuthToBackend() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/authenticate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        token: authToken,
-        user_id: userProfile?.emailAddress
-      })
-    });
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error sending auth to backend:', error);
-    throw error;
-  }
-}
-
-// Fetch email history
-async function fetchEmailHistory() {
-  if (!authToken || !userProfile) {
-    throw new Error('Not authenticated');
-  }
-  
-  try {
-    const response = await fetch(`${API_BASE_URL}/fetch-history`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        user_id: userProfile.emailAddress
-      })
-    });
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching email history:', error);
-    throw error;
-  }
-}
-
-// Analyze writing voice
-async function analyzeVoice() {
-  if (!authToken || !userProfile) {
-    throw new Error('Not authenticated');
-  }
-  
-  try {
-    const response = await fetch(`${API_BASE_URL}/analyze-voice`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        user_id: userProfile.emailAddress
-      })
-    });
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error analyzing voice:', error);
-    throw error;
-  }
-}
-
-// Generate content
-async function generateContent(options) {
-  if (!authToken || !userProfile) {
-    throw new Error('Not authenticated');
-  }
-  
-  try {
-    const response = await fetch(`${API_BASE_URL}/generate-content`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        user_id: userProfile.emailAddress,
-        ...options
-      })
-    });
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error generating content:', error);
-    throw error;
-  }
-}
-
-// Handle periodic mail checks
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'checkMailPeriodically') {
-    // Check for new emails, etc.
-    console.log('Checking mail periodically');
-  }
 });
 
-// Listen for messages from content script and popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  (async () => {
-    try {
-      if (message.action === 'authenticate') {
-        const result = await authenticate();
-        sendResponse(result);
-      } 
-      else if (message.action === 'fetchHistory') {
-        const result = await fetchEmailHistory();
-        sendResponse(result);
+// Start authentication process
+async function startAuthProcess(userId) {
+  try {
+    log('Starting auth process for', userId);
+    
+    // Call authenticate endpoint to get auth URL
+    const response = await fetch(`${API_URL}/authenticate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId })
+    });
+    
+    const data = await response.json();
+    
+    if (!data.success || !data.auth_url) {
+      log('Failed to get auth URL');
+      return { error: 'Failed to get authentication URL' };
+    }
+    
+    // If there's already an interval for this user, clear it
+    if (authCheckIntervalIds[userId]) {
+      clearInterval(authCheckIntervalIds[userId]);
+    }
+    
+    // Set up interval to check auth status
+    authCheckIntervalIds[userId] = setInterval(async () => {
+      const status = await checkAuthStatus(userId);
+      
+      if (status.authenticated) {
+        log('User authenticated:', userId);
+        
+        // Update user state
+        chrome.storage.local.get('userState', (result) => {
+          const userState = result.userState || {};
+          userState.authenticated = true;
+          
+          chrome.storage.local.set({ userState }, () => {
+            log('Updated auth state for user');
+          });
+        });
+        
+        // Clear the interval
+        clearInterval(authCheckIntervalIds[userId]);
+        delete authCheckIntervalIds[userId];
       }
-      else if (message.action === 'analyzeVoice') {
-        const result = await analyzeVoice();
-        sendResponse(result);
+    }, 3000);
+    
+    // Stop checking after 2 minutes
+    setTimeout(() => {
+      if (authCheckIntervalIds[userId]) {
+        clearInterval(authCheckIntervalIds[userId]);
+        delete authCheckIntervalIds[userId];
       }
-      else if (message.action === 'generateContent') {
-        const result = await generateContent(message.options);
-        sendResponse(result);
+    }, 120000);
+    
+    // Open the auth URL in a new tab
+    chrome.tabs.create({ url: data.auth_url });
+    
+    return { authUrl: data.auth_url };
+  } catch (error) {
+    log('Auth process error:', error);
+    return { error: error.message };
+  }
+}
+
+// Listen for OAuth redirect
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url && tab.url.includes('auth-callback')) {
+    log('Detected auth callback URL', tab.url);
+    
+    // Get userId from storage
+    chrome.storage.local.get('userState', (result) => {
+      const userState = result.userState || {};
+      
+      if (!userState.userId) {
+        log('No userId found in storage');
+        return;
       }
-      else if (message.action === 'getAuthStatus') {
-        sendResponse({
-          isAuthenticated: !!authToken,
-          userProfile
+      
+      // Parse URL to get auth result
+      const url = new URL(tab.url);
+      const authSuccess = url.searchParams.get('success') === 'true';
+      
+      if (authSuccess) {
+        // Update user state
+        userState.authenticated = true;
+        chrome.storage.local.set({ userState }, () => {
+          log('Authentication successful, state updated', userState);
+          
+          // Display success message
+          chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            function: showAuthSuccess
+          });
+        });
+      } else {
+        log('Authentication failed');
+        // Show failure message
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          function: showAuthFailure
         });
       }
-    } catch (error) {
-      console.error('Error handling message:', error);
-      sendResponse({ success: false, error: error.message });
-    }
-  })();
+    });
+  }
+});
+
+// Auth success page
+function showAuthSuccess() {
+  document.body.innerHTML = `
+    <div style="text-align: center; font-family: Arial; padding: 50px; background: #f9f9f9;">
+      <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+        <h1 style="color: #4285f4;">Authentication Successful</h1>
+        <p style="font-size: 16px; color: #555;">You may now close this tab and return to the MailSense extension.</p>
+        <button onclick="window.close()" style="background: #4285f4; color: white; border: none; padding: 10px 20px; margin-top: 20px; border-radius: 4px; cursor: pointer;">Close Tab</button>
+      </div>
+    </div>
+  `;
+}
+
+// Auth failure page
+function showAuthFailure() {
+  document.body.innerHTML = `
+    <div style="text-align: center; font-family: Arial; padding: 50px; background: #f9f9f9;">
+      <div style="background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+        <h1 style="color: #d32f2f;">Authentication Failed</h1>
+        <p style="font-size: 16px; color: #555;">There was a problem authenticating with Google. Please try again.</p>
+        <button onclick="window.close()" style="background: #4285f4; color: white; border: none; padding: 10px 20px; margin-top: 20px; border-radius: 4px; cursor: pointer;">Close Tab</button>
+      </div>
+    </div>
+  `;
+}
+
+// Handle messages from content/popup scripts
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  log('Received message', request);
   
-  // Return true to indicate we'll respond asynchronously
-  return true;
+  // Start auth process
+  if (request.action === 'startAuth' && request.userId) {
+    log('Starting auth process for', request.userId);
+    
+    startAuthProcess(request.userId)
+      .then(response => {
+        sendResponse(response);
+      })
+      .catch(error => {
+        sendResponse({ error: error.message });
+      });
+    
+    return true; // Keep channel open for async response
+  }
+  
+  // Check auth status
+  if (request.action === 'checkAuth') {
+    chrome.storage.local.get('userState', (result) => {
+      const userState = result.userState || {};
+      sendResponse({ 
+        authenticated: userState.authenticated || false,
+        setupComplete: userState.setupComplete || false
+      });
+    });
+    return true; // Keep channel open for async response
+  }
 }); 

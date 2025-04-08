@@ -1,126 +1,279 @@
-/* popup.css - Styles for extension popup */
+/* MailSense Popup Styles - Improved */
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    margin: 0;
-    padding: 0;
-    width: 320px;
-    color: #333;
-  }
-  
-  .mailsense-popup {
-    min-height: 200px;
-    padding: 16px;
-  }
-  
-  .mailsense-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 20px;
-  }
-  
-  .mailsense-logo {
-    width: 32px;
-    height: 32px;
-    margin-right: 10px;
-  }
-  
-  .mailsense-header h1 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-  }
-  
-  .mailsense-section {
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #eee;
-  }
-  
-  .mailsense-section:last-child {
-    border-bottom: none;
-  }
-  
-  .mailsense-section h2 {
-    font-size: 14px;
-    font-weight: 500;
-    margin-bottom: 12px;
-    color: #555;
-  }
-  
-  .hidden {
-    display: none;
-  }
-  
-  button {
-    background-color: #1a73e8;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 8px 16px;
-    font-size: 14px;
-    cursor: pointer;
-    margin-top: 8px;
-    transition: background-color 0.2s;
-  }
-  
-  button:hover {
-    background-color: #1765cc;
-  }
-  
-  button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-  }
-  
-  .status-item {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  
-  .status-label {
-    font-weight: 500;
-  }
-  
-  .status-value {
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-  }
-  
-  .status-pending {
-    background-color: #f1f3f4;
-    color: #5f6368;
-  }
-  
-  .status-inprogress {
-    background-color: #fef7e0;
-    color: #bd765d;
-  }
-  
-  .status-success {
-    background-color: #e6f4ea;
-    color: #137333;
-  }
-  
-  .status-error {
-    background-color: #fce8e6;
-    color: #c5221f;
-  }
-  
-  .mailsense-footer {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    margin-top: 12px;
-  }
-  
-  .mailsense-footer a {
-    color: #1a73e8;
-    text-decoration: none;
-  }
-  
-  .mailsense-footer a:hover {
-    text-decoration: underline;
-  }
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-width: 400px;
+  max-width: 400px;
+  color: #333;
+  background-color: #fafafa;
+}
+
+.mailsense-popup {
+  padding: 15px;
+}
+
+/* Error banner */
+.error-banner {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+  border-radius: 4px;
+  border-left: 4px solid #c62828;
+  position: relative;
+  font-size: 14px;
+  animation: slideDown 0.3s ease-out;
+}
+
+.close-btn {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Header */
+.mailsense-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.mailsense-logo {
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+}
+
+.mailsense-header h1 {
+  margin: 0;
+  font-size: 22px;
+  color: #1976d2;
+  font-weight: 500;
+}
+
+/* Sections */
+.mailsense-section {
+  margin-bottom: 25px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.mailsense-section h2 {
+  font-size: 18px;
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #455a64;
+  font-weight: 500;
+}
+
+.mailsense-section p {
+  margin: 10px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #546e7a;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Buttons */
+button {
+  background-color: #1976d2;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 8px;
+  font-weight: 500;
+  transition: background-color 0.2s, transform 0.1s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+button:hover {
+  background-color: #1565c0;
+}
+
+button:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+button:disabled {
+  background-color: #bbdefb;
+  color: #fff;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.hidden {
+  display: none;
+}
+
+/* Status items */
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+  font-size: 14px;
+  background-color: #f5f5f5;
+  padding: 10px 15px;
+  border-radius: 4px;
+}
+
+.status-label {
+  font-weight: 500;
+  color: #455a64;
+}
+
+.status-value {
+  font-weight: 500;
+  border-radius: 12px;
+  padding: 2px 10px;
+}
+
+.status-pending {
+  background-color: #fff9c4;
+  color: #f57f17;
+}
+
+.status-success {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-error {
+  background-color: #ffebee;
+  color: #c62828;
+}
+
+/* Form controls */
+.action-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+  background-color: #f5f5f5;
+  padding: 15px;
+  border-radius: 4px;
+}
+
+.control-group {
+  flex: 1;
+  min-width: 120px;
+}
+
+.control-group label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #455a64;
+  font-weight: 500;
+}
+
+.control-group input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.control-group input:focus {
+  border-color: #1976d2;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+/* Test section */
+.test-section {
+  margin-top: 20px;
+  padding-top: 15px;
+}
+
+#prompt-input, #refinement-input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  min-height: 80px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+#prompt-input:focus, #refinement-input:focus {
+  border-color: #1976d2;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+.result-area {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  border-left: 4px solid #1976d2;
+}
+
+#generated-text {
+  white-space: pre-wrap;
+  background: white;
+  padding: 15px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  margin: 10px 0;
+  font-size: 14px;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.refinement-controls {
+  margin-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 15px;
+}
+
+.refinement-controls h4 {
+  margin-top: 0;
+  color: #455a64;
+}
+
+/* Footer */
+.mailsense-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: #78909c;
+  padding-top: 10px;
+}
+
+.mailsense-footer a {
+  color: #1976d2;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.mailsense-footer a:hover {
+  color: #1565c0;
+  text-decoration: underline;
+}

@@ -489,22 +489,87 @@ def generate_content():
                 "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
             }), 400
         
-        # Call the generate function
-        generated_text = generate.generate_matching_text(
-            examples_file=examples_file,
-            model=model,
-            max_tokens=2000,  # Reasonable default
-            genre=genre,
-            topic=topic,
-            tone=tone,
-            recipient=recipient,
-            length=length,
-            free_form_prompt=prompt if prompt else None
-        )
+        # Call the generate function - prioritize free-form prompt
+        if prompt:
+            # Use free-form prompt mode when prompt is provided
+            generated_text = generate.generate_matching_text(
+                examples_file=examples_file,
+                model=model,
+                max_tokens=2000,
+                length=length,
+                free_form_prompt=prompt,
+                temperature=0  # Low temperature for more predictable results
+            )
+        else:
+            # Fallback to structured parameters if no prompt provided
+            generated_text = generate.generate_matching_text(
+                examples_file=examples_file,
+                model=model,
+                max_tokens=2000,
+                genre=genre,
+                topic=topic,
+                tone=tone,
+                recipient=recipient,
+                length=length
+            )
         
         return jsonify({
             "success": True,
             "generated_text": generated_text
+        })
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+
+@app.route('/api/refine-content', methods=['POST'])
+def refine_content():
+    """Refine previously generated content while maintaining the user's style"""
+    try:
+        data = request.json
+        user_id = data.get('user_id', 'default')
+        original_text = data.get('original_text', '')
+        refinement_instructions = data.get('refinement', '')
+        model = data.get('model', 'gpt-4o')
+        
+        if not original_text:
+            return jsonify({
+                "success": False,
+                "message": "Original text is required for refinement."
+            }), 400
+            
+        if not refinement_instructions:
+            return jsonify({
+                "success": False,
+                "message": "Refinement instructions are required."
+            }), 400
+        
+        # Set file paths
+        user_dir = os.path.join(DATA_DIR, user_id)
+        examples_file = os.path.join(user_dir, "filtered_voice_emails.txt")
+        
+        # Check if examples file exists
+        if not os.path.exists(examples_file):
+            return jsonify({
+                "success": False,
+                "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
+            }), 400
+        
+        # Read examples
+        with open(examples_file, 'r', encoding='utf-8') as f:
+            examples = f.read()
+        
+        # Call the refinement function
+        refined_text = generate.refine_generated_text(
+            examples=examples,
+            original_text=original_text,
+            refinement_instructions=refinement_instructions,
+            model=model,
+            max_tokens=2000,
+            temperature=0
+        )
+        
+        return jsonify({
+            "success": True,
+            "refined_text": refined_text
         })
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400

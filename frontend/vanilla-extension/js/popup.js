@@ -1,11 +1,11 @@
-// MailSense popup.js - Using actual API calls with improved auth flow
+// MailSense popup.js - Redesigned for intuitive experience
 
 // Constants
 const API_URL = 'http://localhost:5000/api';
 
-// Current state - default userId so we never have null
+// Current state with default userId
 let userState = {
-  userId: 'user_' + Date.now(), // Initialize with a default
+  userId: 'user_' + Date.now(),
   authenticated: false,
   emailsFetched: false,
   voiceAnalyzed: false,
@@ -13,11 +13,21 @@ let userState = {
   lastError: null
 };
 
+// Track authentication status
+let authStatus = {
+  inProgress: false,
+  startTime: null,
+  timeElapsed: 0
+};
+
 // Debug logging
 function log(message, data = null) {
   console.log(`MailSense: ${message}`, data || '');
-  
-  // Update debug panel if available
+  updateDebugInfo(message, data);
+}
+
+// Update debug panel
+function updateDebugInfo(message, data = null) {
   const debugInfo = document.getElementById('debug-info');
   if (debugInfo) {
     const timestamp = new Date().toLocaleTimeString();
@@ -80,30 +90,25 @@ async function loadState() {
   });
 }
 
-// Reset state to defaults
-async function resetState() {
-  try {
-    userState = {
-      userId: 'user_' + Date.now(),
-      authenticated: false,
-      emailsFetched: false,
-      voiceAnalyzed: false,
-      setupComplete: false,
-      lastError: null
-    };
-    
-    await saveState();
-    log('State reset', userState);
-    
-    // Reload the UI
-    updateUI();
-    
-    // Show confirmation
-    showMessage('State has been reset');
-  } catch (error) {
-    console.error('Failed to reset state:', error);
-    showError('Failed to reset state: ' + error.message);
-  }
+// Check if authentication is in progress
+async function checkAuthProgress() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'getAuthState' }, (response) => {
+      if (response) {
+        authStatus.inProgress = response.authInProgress;
+        authStatus.startTime = response.authStartTime;
+        
+        if (authStatus.inProgress && authStatus.startTime) {
+          authStatus.timeElapsed = Math.floor((Date.now() - authStatus.startTime) / 1000);
+        }
+        
+        log('Auth progress check', authStatus);
+        resolve(authStatus.inProgress);
+      } else {
+        resolve(false);
+      }
+    });
+  });
 }
 
 // ==== UI MANAGEMENT ====
@@ -112,22 +117,52 @@ async function resetState() {
 function updateUI() {
   log('Updating UI with state', userState);
   
-  // Update auth section
-  updateAuthSection();
+  // Check if auth is in progress
+  checkAuthProgress().then(inProgress => {
+    if (inProgress) {
+      showAuthInProgress();
+    } else {
+      // Update auth section
+      updateAuthSection();
+      
+      // Update progress indicators
+      updateProgressIndicator();
+      
+      // Show/hide sections based on progress
+      updateSectionVisibility();
+      
+      // Update button states
+      updateButtonStates();
+    }
+    
+    // Show any errors
+    if (userState.lastError) {
+      showError(userState.lastError);
+    }
+  });
+}
+
+// Show auth in progress UI
+function showAuthInProgress() {
+  const authStatus = document.getElementById('auth-status');
+  const authButton = document.getElementById('auth-button');
   
-  // Update progress indicators
-  updateProgressIndicators();
+  // Update status text with animated dots
+  authStatus.innerHTML = `
+    <div class="auth-progress">
+      <span>Authentication in progress</span>
+      <span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+    </div>
+    <div class="auth-time">Please complete the Google auth in the opened tab</div>
+  `;
   
-  // Show/hide sections based on progress
-  updateSectionVisibility();
+  // Add pulse animation to status
+  authStatus.classList.add('pulsing');
   
-  // Update button states
-  updateButtonStates();
-  
-  // Show any errors
-  if (userState.lastError) {
-    showError(userState.lastError);
-  }
+  // Change button to cancel button
+  authButton.textContent = 'Cancel Authentication';
+  authButton.classList.add('cancel-auth');
+  authButton.disabled = false;
 }
 
 // Update authentication section
@@ -135,11 +170,15 @@ function updateAuthSection() {
   const authStatus = document.getElementById('auth-status');
   const authButton = document.getElementById('auth-button');
   
+  // Remove any previously added classes
+  authStatus.classList.remove('pulsing');
+  authButton.classList.remove('cancel-auth');
+  
   if (userState.authenticated) {
-    authStatus.textContent = '✅ Authenticated with Google';
+    authStatus.innerHTML = '✅ <span>Authenticated with Google</span>';
     authButton.textContent = 'Re-authenticate';
   } else {
-    authStatus.textContent = 'Authentication required';
+    authStatus.innerHTML = 'Authentication required';
     authButton.textContent = 'Sign in with Google';
   }
   
@@ -147,37 +186,79 @@ function updateAuthSection() {
   authButton.disabled = false;
 }
 
-// Update progress indicators
-function updateProgressIndicators() {
-  const indicators = {
-    'auth-indicator': userState.authenticated,
-    'history-indicator': userState.emailsFetched,
-    'voice-indicator': userState.voiceAnalyzed
-  };
+// Update progress indicator
+function updateProgressIndicator() {
+  // Reset all steps
+  document.querySelectorAll('.progress-step').forEach(step => {
+    step.classList.remove('active', 'completed');
+  });
   
-  for (const [id, completed] of Object.entries(indicators)) {
-    const indicator = document.getElementById(id);
-    if (indicator) {
-      indicator.textContent = completed ? 'Complete' : 'Pending';
-      indicator.className = 'status-value ' + (completed ? 'status-success' : 'status-pending');
+  // Mark steps as active or completed
+  if (!userState.authenticated) {
+    document.querySelector('.progress-step[data-step="auth"]').classList.add('active');
+  } else {
+    document.querySelector('.progress-step[data-step="auth"]').classList.add('completed');
+    
+    if (!userState.emailsFetched) {
+      document.querySelector('.progress-step[data-step="emails"]').classList.add('active');
+    } else {
+      document.querySelector('.progress-step[data-step="emails"]').classList.add('completed');
+      
+      if (!userState.voiceAnalyzed) {
+        document.querySelector('.progress-step[data-step="voice"]').classList.add('active');
+      } else {
+        document.querySelector('.progress-step[data-step="voice"]').classList.add('completed');
+        document.querySelector('.progress-step[data-step="complete"]').classList.add('active');
+      }
     }
   }
 }
 
-// Update section visibility
+// Update section visibility based on current state
 function updateSectionVisibility() {
-  const sections = {
-    'status-section': userState.authenticated,
-    'actions-section': userState.authenticated && !userState.setupComplete,
-    'complete-section': userState.setupComplete
-  };
+  // Get all sections
+  const sections = [
+    'auth-section',
+    'status-section',
+    'actions-section',
+    'complete-section'
+  ];
   
-  for (const [id, visible] of Object.entries(sections)) {
+  // First hide all sections
+  sections.forEach(id => {
     const section = document.getElementById(id);
-    if (section) {
-      section.classList.toggle('hidden', !visible);
-    }
+    if (section) section.classList.add('hidden');
+  });
+  
+  // Show only the most relevant section based on current state
+  if (!userState.authenticated) {
+    // Not authenticated - show auth section only
+    document.getElementById('auth-section')?.classList.remove('hidden');
+  } 
+  else if (userState.authenticated && !userState.emailsFetched) {
+    // Authenticated but no email history - show actions section
+    document.getElementById('actions-section')?.classList.remove('hidden');
+    
+    // We can show status as an additional context, but it's optional
+    // document.getElementById('status-section')?.classList.remove('hidden');
   }
+  else if (userState.authenticated && userState.emailsFetched && !userState.voiceAnalyzed) {
+    // Email history fetched but voice not analyzed - show actions section
+    document.getElementById('actions-section')?.classList.remove('hidden');
+  }
+  else if (userState.authenticated && userState.emailsFetched && userState.voiceAnalyzed) {
+    // Everything is set up - show complete section
+    document.getElementById('complete-section')?.classList.remove('hidden');
+  }
+  
+  // Animate the visible section
+  sections.forEach(id => {
+    const section = document.getElementById(id);
+    if (section && !section.classList.contains('hidden')) {
+      section.classList.add('section-fade-in');
+      setTimeout(() => section.classList.remove('section-fade-in'), 500);
+    }
+  });
 }
 
 // Update button states
@@ -277,49 +358,61 @@ async function callApi(endpoint, payload, buttonId = null) {
 
 // ==== ACTION HANDLERS ====
 
-// Handle authentication - IMPROVED VERSION
+// Handle authentication button click
 async function handleAuthenticate() {
   try {
-    setButtonLoading('auth-button', true, 'Starting auth...');
+    // If auth is in progress and user clicks button, try to focus the auth tab
+    if (authStatus.inProgress) {
+      log('Attempting to cancel ongoing authentication');
+      // Signal background to cancel auth
+      chrome.runtime.sendMessage({ action: 'cancelAuth' });
+      
+      // Reset local auth status
+      authStatus.inProgress = false;
+      updateUI();
+      return;
+    }
     
-    // Tell background script to start auth and monitor process
+    // Normal auth flow
+    log('Starting authentication for user', userState.userId);
+    
+    // Clear any previous errors
+    userState.lastError = null;
+    
+    // Update UI to show auth in progress
+    authStatus.inProgress = true;
+    showAuthInProgress();
+    
+    // Start authentication process via background script
     chrome.runtime.sendMessage(
       { action: 'startAuth', userId: userState.userId },
-      async (response) => {
-        if (!response || !response.authUrl) {
-          showError('Failed to start authentication process');
-          setButtonLoading('auth-button', false);
+      (response) => {
+        if (chrome.runtime.lastError) {
+          log('Error starting auth:', chrome.runtime.lastError);
+          userState.lastError = chrome.runtime.lastError.message;
+          authStatus.inProgress = false;
+          updateUI();
           return;
         }
         
-        // Open auth URL in a new tab
-        chrome.tabs.create({ url: response.authUrl });
-        
-        // Set up a listener for auth completion
-        const onStorageChanged = (changes, area) => {
-          if (area === 'local' && changes.userState) {
-            const newState = changes.userState.newValue;
-            
-            // Update our state if authentication completed
-            if (newState && newState.authenticated) {
-              userState = newState;
-              updateUI();
-              
-              // Remove listener once authenticated
-              chrome.storage.onChanged.removeListener(onStorageChanged);
-            }
-          }
-        };
-        
-        // Add listener for storage changes
-        chrome.storage.onChanged.addListener(onStorageChanged);
-        
-        setButtonLoading('auth-button', false);
+        if (response.error) {
+          log('Auth error:', response.error);
+          userState.lastError = response.error;
+          authStatus.inProgress = false;
+          updateUI();
+        } else {
+          log('Auth started', response);
+          
+          // Auth is now handled by background script
+          // UI updates will come from state change events
+        }
       }
     );
   } catch (error) {
-    showError(`Authentication failed: ${error.message}`);
-    setButtonLoading('auth-button', false);
+    log('Auth error:', error);
+    userState.lastError = error.message;
+    authStatus.inProgress = false;
+    updateUI();
   }
 }
 
@@ -465,6 +558,29 @@ function setupEventListeners() {
   document.getElementById('debug-reset').addEventListener('click', () => {
     resetState();
   });
+  
+  // Listen for state changes from background script
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === 'stateChanged') {
+      log('Received state change notification', message.state);
+      
+      // Update auth status
+      if (message.state.hasOwnProperty('authInProgress')) {
+        authStatus.inProgress = message.state.authInProgress;
+        
+        if (message.state.authenticated) {
+          userState.authenticated = true;
+          saveState().then(() => updateUI());
+        }
+        
+        if (message.state.error) {
+          userState.lastError = message.state.error;
+        }
+        
+        updateUI();
+      }
+    }
+  });
 }
 
 // Initialize the extension
@@ -472,8 +588,64 @@ async function initialize() {
   log('Initializing extension');
   
   try {
+    // Add stylesheet for animations
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+      }
+      
+      .pulsing {
+        animation: pulse 2s infinite;
+      }
+      
+      .auth-progress {
+        display: flex;
+        align-items: center;
+      }
+      
+      .loading-dots span {
+        animation: loadingDots 1.4s infinite both;
+        display: inline-block;
+      }
+      
+      .loading-dots span:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+      
+      .loading-dots span:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+      
+      @keyframes loadingDots {
+        0% { opacity: 0; }
+        50% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      
+      .auth-time {
+        font-size: 12px;
+        color: #666;
+        margin-top: 5px;
+      }
+      
+      .cancel-auth {
+        background-color: #d32f2f !important;
+      }
+      
+      .cancel-auth:hover {
+        background-color: #b71c1c !important;
+      }
+    `;
+    document.head.appendChild(style);
+    
     // Load saved state
     await loadState();
+    
+    // Check if auth is in progress
+    await checkAuthProgress();
     
     // Check if we need to refresh auth status
     if (!userState.authenticated) {
@@ -481,7 +653,11 @@ async function initialize() {
       chrome.runtime.sendMessage({ action: 'checkAuth' }, (response) => {
         if (response && response.authenticated) {
           userState.authenticated = true;
+          authStatus.inProgress = response.authInProgress || false;
           saveState().then(() => updateUI());
+        } else if (response && response.authInProgress) {
+          authStatus.inProgress = true;
+          updateUI();
         }
       });
     }

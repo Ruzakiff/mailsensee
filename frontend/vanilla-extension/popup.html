@@ -3,13 +3,35 @@
 <head>
   <meta charset="utf-8">
   <title>MailSense</title>
-  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="css/popup.css">
 </head>
 <body>
   <div class="mailsense-popup">
     <div class="mailsense-header">
       <img src="icons/icon48.png" alt="MailSense Logo" class="mailsense-logo">
       <h1>MailSense</h1>
+    </div>
+    
+    <div class="setup-progress">
+      <div class="progress-step" data-step="auth">
+        <div class="step-circle">1</div>
+        <div class="step-label">Sign in</div>
+      </div>
+      <div class="progress-line"></div>
+      <div class="progress-step" data-step="emails">
+        <div class="step-circle">2</div>
+        <div class="step-label">Fetch Emails</div>
+      </div>
+      <div class="progress-line"></div>
+      <div class="progress-step" data-step="voice">
+        <div class="step-circle">3</div>
+        <div class="step-label">Analyze Style</div>
+      </div>
+      <div class="progress-line"></div>
+      <div class="progress-step" data-step="complete">
+        <div class="step-circle">4</div>
+        <div class="step-label">Ready</div>
+      </div>
     </div>
     
     <div id="auth-section" class="mailsense-section">

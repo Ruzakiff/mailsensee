@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 import concurrent.futures
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage
+from mailsense.storage import read_file, write_file, append_to_file, file_exists
 
 # Load environment variables from .env file (including OPENAI_API_KEY)
 load_dotenv()
@@ -207,8 +208,8 @@ def split_into_chunks(text: str, chunk_size: int, overlap: int, model: str) -> L
     return chunks
 
 async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: int, 
-                        total_chunks: int, output_file: str, file_lock) -> int:
-    """Process a text chunk through the OpenAI API and write results to file immediately."""
+                        total_chunks: int, user_id: str, output_file: str, file_lock) -> int:
+    """Process a text chunk through the OpenAI API and write results to S3 immediately."""
     prompt = FILTER_PROMPT.format(chunk=chunk)
     
     # Create AsyncOpenAI client
@@ -235,10 +236,9 @@ async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: i
             
             filtered_content = response.choices[0].message.content
             
-            # Write this chunk's results to the output file immediately
+            # Write to S3 instead of local file
             async with file_lock:
-                with open(output_file, 'a', encoding='utf-8') as f:
-                    f.write(filtered_content + "\n\n")
+                append_to_file(user_id, output_file, filtered_content + "\n\n")
             
             output_tokens = count_tokens(filtered_content, model)
             print(f"✓ Processed chunk {chunk_number}/{total_chunks} - Tokens: {output_tokens}")
@@ -262,8 +262,7 @@ async def process_chunk(chunk: str, model: str, max_tokens: int, chunk_number: i
     # Write a failure notice to the output file
     error_message = f"[Processing failed for chunk {chunk_number}]"
     async with file_lock:
-        with open(output_file, 'a', encoding='utf-8') as f:
-            f.write(error_message + "\n\n")
+        append_to_file(user_id, output_file, error_message + "\n\n")
     
     return 0  # Return 0 tokens for a failed chunk
 
@@ -382,7 +381,7 @@ async def process_single_second_stage_chunk(content: str, model: str, max_tokens
     return ""  # Return empty string if filtering fails completely
 
 async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int, output_file: str, 
-                                 apply_second_filter: bool = False) -> int:
+                                 apply_second_filter: bool = False, user_id: str = "default") -> int:
     """Process all chunks in parallel with rate limiting and write to file as they complete."""
     # Initialize output file with empty content
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -396,7 +395,7 @@ async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int
     for i, chunk in enumerate(chunks):
         # Add a tiny stagger to avoid exact simultaneous connections
         await asyncio.sleep(0.1)
-        tasks.append(process_chunk(chunk, model, max_tokens, i+1, len(chunks), output_file, file_lock))
+        tasks.append(process_chunk(chunk, model, max_tokens, i+1, len(chunks), user_id, output_file, file_lock))
     
     # Start all requests simultaneously but with slight staggering
     print(f"Starting parallel processing of {len(chunks)} chunks...")
@@ -452,18 +451,19 @@ async def main():
                        help="Apply second-stage optimization to reduce to under 4000 tokens")
     parser.add_argument("--target-tokens", type=int, default=4000,
                        help="Target token count for second-stage optimization (default: 4000)")
+    parser.add_argument("--user-id", default="default", 
+                      help="User ID for S3 storage (default: default)")
     
     args = parser.parse_args()
     
-    # Verify input file exists
-    if not os.path.isfile(args.input_file):
-        print(f"Error: Input file '{args.input_file}' not found.")
+    # Verify input file exists in S3
+    if not file_exists(args.user_id, args.input_file):
+        print(f"Error: Input file '{args.input_file}' not found for user {args.user_id}.")
         return 1
     
-    # Read the input file
-    print(f"Reading input file: {args.input_file}")
-    with open(args.input_file, 'r', encoding='utf-8') as f:
-        text = f.read()
+    # Read the input file from S3
+    print(f"Reading input file: {args.input_file} for user {args.user_id}")
+    text = read_file(args.user_id, args.input_file)
     
     # Calculate token count
     token_count = count_tokens(text, args.model)
@@ -483,7 +483,7 @@ async def main():
     start_time = time.time()
     print(f"Processing chunks with {args.model} in parallel...")
     output_token_count = await process_chunks_parallel(
-        chunks, args.model, args.max_tokens, args.output, args.optimize)
+        chunks, args.model, args.max_tokens, args.output, args.optimize, args.user_id)
     
     elapsed_time = time.time() - start_time
     print(f"Processing completed in {elapsed_time:.2f} seconds")

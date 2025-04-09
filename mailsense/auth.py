@@ -5,6 +5,7 @@ import webbrowser
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from mailsense.storage import read_pickle, write_pickle, file_exists
 
 # If modifying these scopes, delete the token.pickle file
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -12,18 +13,25 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 def get_credentials():
     """Get valid user credentials from storage or through OAuth flow."""
     creds = None
-    # The token.pickle file stores the user's access and refresh tokens
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
+    
+    # Check if credentials exist in S3
+    user_id = 'default'  # Or get from session/request
+    token_file = 'token.pickle'
+    
+    if file_exists(user_id, token_file):
+        try:
+            creds = read_pickle(user_id, token_file)
+            print("Found existing credentials")
+        except Exception as e:
+            print(f"Error loading credentials: {e}")
+            creds = None
     
     # If there are no (valid) credentials available, let the user log in
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
+                write_pickle(user_id, token_file, creds)
                 print("Using refreshed credentials")
             except Exception as e:
                 print(f"Could not refresh token: {e}")
@@ -34,11 +42,21 @@ def get_credentials():
             try:
                 # First, get the client secrets file
                 import glob
-                client_secret_files = glob.glob("client_secret*.json")
+                client_secret_files = glob.glob(os.path.join(os.getcwd(), "client_secret*.json"))
                 if not client_secret_files:
-                    raise FileNotFoundError("No client_secret*.json file found")
+                    # Try to use environment variable
+                    secret_content = os.environ.get('GOOGLE_CLIENT_SECRETS')
+                    if secret_content:
+                        # Write the content to a temporary file
+                        secrets_path = os.path.join(os.getcwd(), "client_secret_temp.json")
+                        with open(secrets_path, 'w') as f:
+                            f.write(secret_content)
+                        client_secrets_file = secrets_path
+                    else:
+                        raise FileNotFoundError("No client_secret*.json file found and no GOOGLE_CLIENT_SECRETS environment variable set")
+                else:
+                    client_secrets_file = client_secret_files[0]
                 
-                client_secrets_file = client_secret_files[0]
                 print(f"Using credentials file: {client_secrets_file}")
                 
                 # Create the flow with manual redirect
@@ -63,9 +81,8 @@ def get_credentials():
                 flow.fetch_token(code=code)
                 creds = flow.credentials
                 
-                # Save the credentials for future runs
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
+                # Save credentials to S3
+                write_pickle(user_id, token_file, creds)
                 
             except Exception as e:
                 print(f"\nAuthentication error: {str(e)}")

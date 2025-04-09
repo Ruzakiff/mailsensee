@@ -14,6 +14,9 @@ import pickle
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import urllib.parse
+from mailsense.storage import (read_file, write_file, append_to_file, 
+                               file_exists, read_pickle, write_pickle,
+                               list_files, delete_file, ensure_bucket_exists)
 
 # Load environment variables
 load_dotenv()
@@ -43,6 +46,9 @@ app.secret_key = secrets.token_hex(16)  # For session management
 
 # Store pending auth requests
 auth_requests = {}
+
+# Ensure S3 bucket exists when app starts
+ensure_bucket_exists()
 
 @app.route('/api/authenticate', methods=['POST'])
 def authenticate():
@@ -196,200 +202,156 @@ def auth_status():
 
 @app.route('/api/fetch-history', methods=['POST'])
 def fetch_history():
-    """Fetch Gmail history for the authenticated user, extracting only content they wrote"""
+    """Fetch email history from Gmail."""
     try:
-        # Get parameters from request
         data = request.json
         user_id = data.get('user_id', 'default')
+        
+        # Get date range if specified
         after_date = data.get('after_date', '2014/01/01')
         before_date = data.get('before_date', '2022/01/01')
-        email_limit = data.get('email_limit', 1000)  # Default limit of 1000 emails
+        email_limit = int(data.get('limit', 1000))
         
-        # Get user's credentials
-        tokens_dir = os.path.join(DATA_DIR, 'tokens')
-        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
+        # Set the query to get sent emails from the specified date range
+        query = f"in:sent after:{after_date} before:{before_date}"
         
-        if not os.path.exists(token_path):
-            return jsonify({
-                "success": False,
-                "message": f"User not authenticated. Please authenticate first."
-            }), 401
+        print(f"Fetching sent emails for {user_id} from {after_date} to {before_date}...")
         
-        # Load credentials
-        with open(token_path, 'rb') as token:
-            creds = pickle.load(token)
-            
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    with open(token_path, 'wb') as token:
-                        pickle.dump(creds, token)
-                except:
-                    return jsonify({
-                        "success": False,
-                        "message": "Credentials expired and couldn't be refreshed."
-                    }), 401
-            else:
-                return jsonify({
-                    "success": False,
-                    "message": "Invalid credentials. Please authenticate again."
-                }), 401
+        # Create the Gmail client
+        client = gmail_history.GmailClient(user_id)
         
-        # Create user directory
-        user_dir = os.path.join(DATA_DIR, user_id)
-        os.makedirs(user_dir, exist_ok=True)
+        # Prepare output file
+        output_file = f"sent_emails.txt"
         
-        # Set output file paths
-        output_file = os.path.join(user_dir, "sent_emails.txt")
-        progress_file = os.path.join(user_dir, "email_fetch_progress.txt")
-        
-        # Set up parameters for Gmail query
-        client = gmail_history.GmailClient(user_id=user_id)
-        query = f"in:sent after:{after_date.replace('/', '/')} before:{before_date.replace('/', '/')}"
-        
-        print(f"Fetching emails for user {user_id} with query: {query} (limit: {email_limit} emails)")
-        
-        # Initialize or load progress tracking
+        # Check if we have a progress file in S3
+        progress_file = f"email_fetch_progress.txt"
         processed_ids = set()
-        if os.path.exists(progress_file):
-            with open(progress_file, 'r') as f:
-                processed_ids = set(line.strip() for line in f if line.strip())
+        
+        if file_exists(user_id, progress_file):
+            progress_content = read_file(user_id, progress_file)
+            processed_ids = set(line.strip() for line in progress_content.split('\n') if line.strip())
             print(f"Resuming from previous run, {len(processed_ids)} emails already processed.")
         
-        # Open the output file in append mode
-        with open(output_file, 'a', encoding='utf-8') as out_file:
-            # Track our progress
-            page_token = None
-            total_fetched = 0
-            actual_processed = 0
-            limit_reached = False
+        # Track our progress
+        page_token = None
+        total_fetched = 0
+        actual_processed = 0
+        limit_reached = False
+        
+        # Loop to handle pagination
+        while True:
+            # Check if we've reached the limit
+            if total_fetched >= email_limit:
+                print(f"Reached email processing limit of {email_limit}")
+                limit_reached = True
+                break
             
-            # Loop to handle pagination
-            while True:
+            # Fetch a batch of emails
+            try:
+                results = client.service.users().messages().list(
+                    userId='me',
+                    q=query,
+                    maxResults=min(100, email_limit - total_fetched),  # Don't fetch more than we need
+                    pageToken=page_token
+                ).execute()
+            except Exception as e:
+                print(f"Error fetching messages: {e}")
+                return jsonify({"success": False, "message": f"Error fetching messages: {str(e)}"}), 400
+            
+            messages = results.get('messages', [])
+            if not messages:
+                break
+                
+            batch_size = len(messages)
+            print(f"Processing batch of {batch_size} emails...")
+            
+            # Process each message
+            for i, message in enumerate(messages):
                 # Check if we've reached the limit
                 if total_fetched >= email_limit:
-                    print(f"Reached email processing limit of {email_limit}")
+                    print(f"Reached email processing limit of {email_limit} during batch")
                     limit_reached = True
                     break
+                    
+                total_fetched += 1
+                msg_id = message['id']
                 
-                # Fetch a batch of emails
+                # Skip if already processed
+                if msg_id in processed_ids:
+                    continue
+                
                 try:
-                    results = client.service.users().messages().list(
-                        userId='me',
-                        q=query,
-                        maxResults=min(100, email_limit - total_fetched),  # Don't fetch more than we need
-                        pageToken=page_token
+                    # Get full message details
+                    msg = client.service.users().messages().get(
+                        userId='me', id=msg_id, format='full'
                     ).execute()
-                except Exception as e:
-                    print(f"Error fetching messages: {e}")
-                    return jsonify({"success": False, "message": f"Error fetching messages: {str(e)}"}), 400
-                
-                messages = results.get('messages', [])
-                if not messages:
-                    break
                     
-                batch_size = len(messages)
-                print(f"Processing batch of {batch_size} emails...")
-                
-                # Process each message
-                for i, message in enumerate(messages):
-                    # Check if we've reached the limit
-                    if total_fetched >= email_limit:
-                        print(f"Reached email processing limit of {email_limit} during batch")
-                        limit_reached = True
-                        break
-                        
-                    total_fetched += 1
-                    msg_id = message['id']
+                    # Extract email details
+                    headers = msg['payload']['headers']
+                    subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
+                    to = next((h['value'] for h in headers if h['name'].lower() == 'to'), 'Unknown')
+                    date = next((h['value'] for h in headers if h['name'].lower() == 'date'), 'Unknown')
                     
-                    # Skip if already processed
-                    if msg_id in processed_ids:
+                    # Extract body
+                    body = ""
+                    if 'parts' in msg['payload']:
+                        for part in msg['payload']['parts']:
+                            if part['mimeType'] == 'text/plain':
+                                body = gmail_history.decode_body(part['body'].get('data', ''))
+                                break
+                            elif part['mimeType'] == 'text/html' and not body:
+                                body = gmail_history.clean_html(gmail_history.decode_body(part['body'].get('data', '')))
+                    elif 'body' in msg['payload'] and 'data' in msg['payload']['body']:
+                        body = gmail_history.decode_body(msg['payload']['body'].get('data', ''))
+                    
+                    # Extract only the user's original content
+                    your_content = gmail_history.extract_your_content(body, date)
+                    
+                    # Skip emails with empty content after extraction
+                    if not your_content.strip():
+                        print(f"Skipping email with no original content: {msg_id}")
+                        # Mark as processed to avoid reprocessing
+                        append_to_file(user_id, progress_file, f"{msg_id}\n")
+                        processed_ids.add(msg_id)
                         continue
                     
-                    try:
-                        # Get full message details
-                        msg = client.service.users().messages().get(
-                            userId='me', id=msg_id, format='full'
-                        ).execute()
-                        
-                        # Extract email details
-                        headers = msg['payload']['headers']
-                        subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
-                        to = next((h['value'] for h in headers if h['name'].lower() == 'to'), 'Unknown')
-                        date = next((h['value'] for h in headers if h['name'].lower() == 'date'), 'Unknown')
-                        
-                        # Extract body
-                        body = ""
-                        if 'parts' in msg['payload']:
-                            for part in msg['payload']['parts']:
-                                if part['mimeType'] == 'text/plain':
-                                    body = gmail_history.decode_body(part['body'].get('data', ''))
-                                    break
-                                elif part['mimeType'] == 'text/html' and not body:
-                                    body = gmail_history.clean_html(gmail_history.decode_body(part['body'].get('data', '')))
-                        elif 'body' in msg['payload'] and 'data' in msg['payload']['body']:
-                            body = gmail_history.decode_body(msg['payload']['body'].get('data', ''))
-                        
-                        # Extract only the user's original content
-                        your_content = gmail_history.extract_your_content(body, date)
-                        
-                        # Skip emails with empty content after extraction
-                        if not your_content.strip():
-                            print(f"Skipping email with no original content: {msg_id}")
-                            # Mark as processed to avoid reprocessing
-                            with open(progress_file, 'a') as prog:
-                                prog.write(f"{msg_id}\n")
-                            processed_ids.add(msg_id)
-                            continue
-                        
-                        # Write to file immediately
-                        out_file.write(f"Email ID: {msg_id}\n")
-                        out_file.write(f"Date: {date}\n")
-                        out_file.write(f"To: {to}\n")
-                        out_file.write(f"Subject: {subject}\n")
-                        out_file.write("Your Content:\n")
-                        out_file.write(your_content)
-                        out_file.write("\n" + "="*80 + "\n\n")
-                        
-                        # Flush to ensure it's written to disk
-                        out_file.flush()
-                        
-                        # Mark as processed
-                        with open(progress_file, 'a') as prog:
-                            prog.write(f"{msg_id}\n")
-                        
-                        processed_ids.add(msg_id)
-                        actual_processed += 1
-                        
-                        # Progress update
-                        if (i + 1) % 10 == 0:
-                            print(f"  Processed {i + 1}/{batch_size} in current batch, saved {actual_processed} emails")
-                        
-                    except Exception as e:
-                        print(f"Error processing message {msg_id}: {e}")
+                    # Write to S3 instead of local file
+                    email_content = f"Email ID: {msg_id}\nDate: {date}\nTo: {to}\nSubject: {subject}\nYour Content:\n{your_content}\n{'='*80}\n\n"
+                    append_to_file(user_id, output_file, email_content)
                     
-                    # Sleep briefly to avoid hitting rate limits
-                    time.sleep(0.05)
+                    # Mark as processed in S3
+                    append_to_file(user_id, progress_file, f"{msg_id}\n")
+                    processed_ids.add(msg_id)
+                    actual_processed += 1
+                    
+                    # Progress update
+                    if (i + 1) % 10 == 0:
+                        print(f"  Processed {i + 1}/{batch_size} in current batch, saved {actual_processed} emails")
+                    
+                except Exception as e:
+                    print(f"Error processing message {msg_id}: {e}")
                 
-                # Check if limit was reached during batch processing
-                if limit_reached:
-                    break
-                
-                print(f"Batch complete. Total processed: {total_fetched}, saved: {actual_processed} with user content.")
-                
-                # Check if there are more pages
-                page_token = results.get('nextPageToken')
-                if not page_token:
-                    break
+                # Sleep briefly to avoid hitting rate limits
+                time.sleep(0.05)
+            
+            # Check if limit was reached during batch processing
+            if limit_reached:
+                break
+            
+            print(f"Batch complete. Total processed: {total_fetched}, saved: {actual_processed} with user content.")
+            
+            # Check if there are more pages
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
         
-        # Add stats about the extraction
-        with open(os.path.join(user_dir, "email_extraction_stats.txt"), 'w') as stats_file:
-            stats_file.write(f"Total emails fetched: {total_fetched}\n")
-            stats_file.write(f"Emails with user content extracted: {actual_processed}\n")
-            stats_file.write(f"Extraction date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            stats_file.write(f"Limit reached: {limit_reached}\n")
-            stats_file.write(f"Email limit: {email_limit}\n")
+        # Add stats about the extraction to S3
+        stats_content = f"Total emails fetched: {total_fetched}\n"
+        stats_content += f"Emails with user content extracted: {actual_processed}\n"
+        stats_content += f"Extraction date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        stats_content += f"Limit reached: {limit_reached}\n"
+        stats_content += f"Email limit: {email_limit}\n"
+        write_file(user_id, "email_extraction_stats.txt", stats_content)
         
         limit_message = " (reached configured limit)" if limit_reached else ""
         

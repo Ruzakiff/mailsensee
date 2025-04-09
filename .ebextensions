@@ -1,0 +1,12 @@
+option_settings:
+  aws:elasticbeanstalk:application:environment:
+    S3_PREFIX: mailsense
+    S3_BUCKET: mailusers
+    FLASK_ENV: production
+    DEFAULT_MODEL: gpt-4o
+    DEBUG: "True"
+    DATA_DIR: /opt/python/current/app/user_data
+    USER_DATA_DIR: /opt/python/current/app/user_data
+    TOKEN_DIR: /opt/python/current/app/user_data/tokens
+    EMAIL_FETCH_LIMIT: 1000
+    EMAIL_FETCH_QUERY: "in:sent after:2014/01/01 before:2022/01/01"

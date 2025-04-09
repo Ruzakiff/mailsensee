@@ -14,6 +14,7 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 from openai import OpenAI
 import tiktoken
+from mailsense.storage import read_file, write_file, file_exists
 
 # Load environment variables from .env file (including OPENAI_API_KEY)
 load_dotenv()
@@ -21,7 +22,7 @@ load_dotenv()
 # Get API key from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise ValueError("Missing OPENAI_API_KEY environment variable. Set this in a .env file or export it.")
+    raise ValueError("Missing OPENAI_API_KEY environment variable. Set this in a .env file, through Docker environment variables, or in AWS configuration.")
 
 # Default model and token settings
 DEFAULT_MODEL = "gpt-4o"
@@ -338,6 +339,7 @@ def refine_generated_text(
     return refined_text
 
 def generate_matching_text(
+    user_id: str,
     examples_file: str,
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
@@ -359,10 +361,13 @@ def generate_matching_text(
     if user_context is None:
         user_context = {}
     
-    # Read the examples file
-    print(f"Reading examples from: {examples_file}")
-    with open(examples_file, 'r', encoding='utf-8') as f:
-        examples = f.read()
+    # Read the examples file from S3
+    print(f"Reading examples from: {examples_file} for user {user_id}")
+    try:
+        examples = read_file(user_id, examples_file)
+    except Exception as e:
+        print(f"Error reading examples file: {e}")
+        raise Exception(f"Failed to read examples file: {str(e)}")
     
     # Count tokens in examples to ensure we stay within context limits
     examples_tokens = count_tokens(examples, model)
@@ -517,11 +522,10 @@ IMPORTANT FORENSIC CONSIDERATIONS:
                 user_context=user_context
             )
     
-    # Save to output file if specified
+    # Save to S3 if output file specified
     if output_file:
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(generated_text)
-        print(f"Generated text saved to: {output_file}")
+        write_file(user_id, output_file, generated_text)
+        print(f"Generated text saved to S3: {output_file} for user {user_id}")
     
     return generated_text
 
@@ -565,15 +569,20 @@ def main():
     refinement_group.add_argument("--interactive", "-i", action="store_true",
                        help="Interactive mode: view generated text and provide refinement instructions")
     
+    # Add user_id parameter
+    parser.add_argument("--user-id", default="default", 
+                      help="User ID for S3 storage (default: default)")
+    
     args = parser.parse_args()
     
-    # Verify examples file exists
-    if not os.path.isfile(args.examples_file):
-        print(f"Error: Examples file '{args.examples_file}' not found.")
+    # Verify examples file exists in S3
+    if not file_exists(args.user_id, args.examples_file):
+        print(f"Error: Examples file '{args.examples_file}' not found for user {args.user_id}.")
         return 1
     
-    # Generate text
+    # Generate text with S3 integration
     generated_text = generate_matching_text(
+        user_id=args.user_id,
         examples_file=args.examples_file,
         model=args.model,
         max_tokens=args.max_tokens,

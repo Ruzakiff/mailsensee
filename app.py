@@ -50,6 +50,22 @@ auth_requests = {}
 # Ensure S3 bucket exists when app starts
 ensure_bucket_exists()
 
+@app.route('/')
+def index():
+    """Root endpoint that provides API information"""
+    api_info = {
+        "name": "MailSense API",
+        "version": "1.0",
+        "endpoints": [
+            {"path": "/api/authenticate", "method": "POST", "description": "Start OAuth flow for authentication"},
+            {"path": "/oauth2callback", "method": "GET", "description": "OAuth callback handler"},
+            {"path": "/api/fetch-history", "method": "POST", "description": "Fetch email history"},
+            {"path": "/api/analyze-voice", "method": "POST", "description": "Analyze writing voice"},
+            {"path": "/api/generate-content", "method": "POST", "description": "Generate content based on voice"}
+        ]
+    }
+    return jsonify(api_info)
+
 @app.route('/api/authenticate', methods=['POST'])
 def authenticate():
     """Start OAuth flow with proper redirects"""
@@ -678,5 +694,10 @@ if __name__ == "__main__":
         print("Make sure the server is already running in another terminal!")
         test_all_endpoints()
     else:
-        print("Starting Flask server...")
-        app.run(debug=True, port=5000) 
+        # Get host and port from environment variables with defaults
+        host = os.environ.get('HOST', '0.0.0.0')  # Listen on all interfaces by default
+        port = int(os.environ.get('PORT', 8080))
+        debug = True
+        
+        print(f"Starting Flask server on {host}:{port} (debug={debug})...")
+        app.run(host=host, port=port, debug=debug) 

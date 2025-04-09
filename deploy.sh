@@ -7,7 +7,10 @@ ZIP_FILE="mailsense-deployment.zip"
 rm -f $ZIP_FILE
 
 # Create a new zip file with explicitly selected files
-zip $ZIP_FILE .dockerignore .ebextensions .ebignore .gitignore app.py Dockerfile findvoice.py generate.py gmail_history.py requirements.txt
+zip $ZIP_FILE .dockerignore .ebignore .gitignore app.py Dockerfile findvoice.py generate.py gmail_history.py requirements.txt
+
+# Add .ebextensions folder
+zip -r $ZIP_FILE .ebextensions/
 
 # Add only the mailsense package without unwanted files
 zip -r $ZIP_FILE mailsense/ -x "*.pyc" "*__pycache__*" "*.DS_Store"

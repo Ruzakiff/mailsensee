@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1
 ENV DATA_DIR=/app/user_data
 
 # Expose the port
-EXPOSE 5000
+EXPOSE 8080
 
 # Command to run the application
 CMD ["python", "app.py"]

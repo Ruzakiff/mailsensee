@@ -4,8 +4,8 @@ from botocore.exceptions import ClientError
 import io
 import pickle
 
-# Get S3 bucket name from environment variable
-S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
+# Get S3 bucket name from environment variable with a default
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'mailusers')
 S3_PREFIX = os.environ.get('S3_PREFIX', 'mailsense')
 
 # Initialize S3 client

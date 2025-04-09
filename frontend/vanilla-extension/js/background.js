@@ -1,7 +1,7 @@
 // MailSense background script - Redesigned for intuitive experience
 
 // API base URL
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'http://mailsense-env.eba-a9gvgpmm.us-east-1.elasticbeanstalk.com/api';
 
 // Global tracking of auth check intervals
 const authCheckIntervalIds = {};

@@ -40,21 +40,20 @@ def get_credentials():
         if not creds or not creds.valid:
             # Direct manual authentication approach
             try:
-                # First, get the client secrets file
-                import glob
-                client_secret_files = glob.glob(os.path.join(os.getcwd(), "client_secret*.json"))
-                if not client_secret_files:
-                    # Try to use environment variable
-                    secret_content = os.environ.get('GOOGLE_CLIENT_SECRETS')
-                    if secret_content:
-                        # Write the content to a temporary file
-                        secrets_path = os.path.join(os.getcwd(), "client_secret_temp.json")
-                        with open(secrets_path, 'w') as f:
-                            f.write(secret_content)
-                        client_secrets_file = secrets_path
-                    else:
-                        raise FileNotFoundError("No client_secret*.json file found and no GOOGLE_CLIENT_SECRETS environment variable set")
+                # First, try to use environment variable
+                secret_content = os.environ.get('GOOGLE_CLIENT_SECRETS')
+                if secret_content:
+                    # Write the content to a temporary file
+                    secrets_path = os.path.join(os.getcwd(), "client_secret_temp.json")
+                    with open(secrets_path, 'w') as f:
+                        f.write(secret_content)
+                    client_secrets_file = secrets_path
                 else:
+                    # Fall back to looking for client secret files
+                    import glob
+                    client_secret_files = glob.glob(os.path.join(os.getcwd(), "client_secret*.json"))
+                    if not client_secret_files:
+                        raise FileNotFoundError("No client_secret*.json file found and no GOOGLE_CLIENT_SECRETS environment variable set")
                     client_secrets_file = client_secret_files[0]
                 
                 print(f"Using credentials file: {client_secrets_file}")

@@ -81,13 +81,28 @@ def authenticate():
         # Create a state token to prevent CSRF
         state = secrets.token_hex(16)
         
-        # Get client secrets file
-        import glob
-        client_secret_files = glob.glob("client_secret*.json")
-        if not client_secret_files:
+        # Look for client secrets in environment or file
+        client_secrets_file = None
+        
+        # First, try to use environment variable
+        secret_content = os.environ.get('GOOGLE_CLIENT_SECRETS')
+        if secret_content:
+            # Write the content to a temporary file
+            secrets_path = os.path.join(os.getcwd(), "client_secret_temp.json")
+            with open(secrets_path, 'w') as f:
+                f.write(secret_content)
+            client_secrets_file = secrets_path
+        else:
+            # Fall back to looking for client secret files
+            import glob
+            client_secret_files = glob.glob("client_secret*.json")
+            if client_secret_files:
+                client_secrets_file = client_secret_files[0]
+        
+        if not client_secrets_file:
             return jsonify({"success": False, "message": "No client secrets file found"}), 400
         
-        client_secrets_file = client_secret_files[0]
+        print(f"Using credentials file: {client_secrets_file}")
         
         # Read client_id from client secrets file
         with open(client_secrets_file, 'r') as f:
@@ -96,6 +111,9 @@ def authenticate():
         
         # Create the authorization URL
         SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+        
+        # Set the appropriate redirect URI
+        is_production = os.environ.get('DEPLOYMENT_ENV') == 'production'
         redirect_uri = url_for('oauth_callback', _external=True)
         
         # Store user_id with auth request

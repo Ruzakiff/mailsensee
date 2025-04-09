@@ -1,7 +1,7 @@
 // MailSense popup.js - Redesigned for intuitive experience
 
 // Constants
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'http://mailsense-env.eba-a9gvgpmm.us-east-1.elasticbeanstalk.com/api';
 
 // Extended userState with profile information
 let userState = {

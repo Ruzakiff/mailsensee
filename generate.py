@@ -281,15 +281,36 @@ def refine_generated_text(
     refinement_instructions: str,
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-    temperature: float = 0
+    temperature: float = 0,
+    user_context=None
 ) -> str:
     """Refine previously generated text based on instructions while maintaining style."""
+    
+    # Ensure user_context is always a dict
+    if user_context is None:
+        user_context = {}
+    
+    # Build context details string if context provided
+    context_details = ""
+    if user_context:
+        # Add user context details
+        context_details += "\nWriter details:\n"
+        if user_context.get('name'):
+            context_details += f"- Name: {user_context['name']}\n"
+        if user_context.get('role'):
+            context_details += f"- Job role: {user_context['role']}\n"
+        if user_context.get('company'):
+            context_details += f"- Company: {user_context['company']}\n"
+        if user_context.get('industry'):
+            context_details += f"- Industry: {user_context['industry']}\n"
+        if user_context.get('additionalContext'):
+            context_details += f"- Additional context: {user_context['additionalContext']}\n"
     
     # Format refinement prompt
     prompt = REFINEMENT_PROMPT.format(
         examples=examples,
         original_text=original_text,
-        refinement=refinement_instructions
+        refinement=refinement_instructions + context_details
     )
     
     # Create OpenAI client
@@ -320,18 +341,23 @@ def generate_matching_text(
     examples_file: str,
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-    genre: str = "email",
-    topic: str = "project update",
-    tone: str = "professional",
-    recipient: str = "colleague",
+    genre: str = None,
+    topic: str = None,
+    tone: str = None,
+    recipient: str = None,
     length: int = 300,
-    temperature: float = 0,
+    temperature: float = 0.7,
     output_file: str = None,
     free_form_prompt: str = None,
     refinement: str = None,
-    interactive: bool = False
+    interactive: bool = False,
+    user_context=None
 ) -> str:
     """Generate text that forensically matches the author's writing style."""
+    
+    # Ensure user_context is always a dict
+    if user_context is None:
+        user_context = {}
     
     # Read the examples file
     print(f"Reading examples from: {examples_file}")
@@ -354,21 +380,72 @@ def generate_matching_text(
     
     # Format user prompt based on whether we're using free-form or structured
     if free_form_prompt:
-        user_prompt = FREE_FORM_PROMPT.format(
-            examples=examples,
-            prompt=free_form_prompt,
-            length=length
-        )
+        # Free-form prompt mode
+        context_details = ""
+        if user_context:
+            # Add user context details
+            context_details += "\nWriter details:\n"
+            if user_context.get('name'):
+                context_details += f"- Name: {user_context['name']}\n"
+            if user_context.get('role'):
+                context_details += f"- Job role: {user_context['role']}\n"
+            if user_context.get('company'):
+                context_details += f"- Company: {user_context['company']}\n"
+            if user_context.get('industry'):
+                context_details += f"- Industry: {user_context['industry']}\n"
+            if user_context.get('additionalContext'):
+                context_details += f"- Additional context: {user_context['additionalContext']}\n"
+        
+        prompt = f"""I'll show you examples of my writing style, then I want you to write {length} words in exactly the same style. 
+
+Here are examples of my writing:
+
+{examples}
+
+Now, please write in my exact style: {free_form_prompt}{context_details}
+
+Remember to match my writing style, tone, vocabulary, and quirks exactly.
+"""
     else:
-        user_prompt = USER_PROMPT.format(
-            examples=examples,
-            genre=genre,
-            topic=topic,
-            tone=tone,
-            recipient=recipient,
-            length=length
-        )
-    
+        # Structured mode
+        genre_text = genre or "email"
+        topic_text = topic or "a response"
+        tone_text = tone or "professional"
+        recipient_text = recipient or "a colleague"
+        
+        context_details = ""
+        if user_context:
+            # Add user context details
+            context_details += "\nWriter details:\n"
+            if user_context.get('name'):
+                context_details += f"- Name: {user_context['name']}\n"
+            if user_context.get('role'):
+                context_details += f"- Job role: {user_context['role']}\n"
+            if user_context.get('company'):
+                context_details += f"- Company: {user_context['company']}\n"
+            if user_context.get('industry'):
+                context_details += f"- Industry: {user_context['industry']}\n"
+            if user_context.get('additionalContext'):
+                context_details += f"- Additional context: {user_context['additionalContext']}\n"
+                
+        prompt = f"""I'll show you examples of my writing style, then I want you to write {length} words in my precise linguistic style that would pass forensic analysis.
+
+Here are examples of my authentic writing:
+
+{examples}
+
+Now, please write in my exact style: {free_form_prompt}{context_details}
+
+IMPORTANT FORENSIC CONSIDERATIONS:
+1. Match my exact writing fingerprint at all levels (lexical, syntactic, semantic, pragmatic)
+2. Replicate my characteristic word choices, sentence structures, and paragraph organization 
+3. Preserve my function word frequencies, punctuation patterns, and error distribution
+4. Capture my distinctive rhythm, flow, and thought sequencing patterns
+5. Maintain my unique stylistic markers, quirks, and unconscious patterns
+6. Ensure statistical properties match my reference texts (sentence length distribution, lexical diversity)
+7. The output should be indistinguishable from my authentic writing even to expert analysis
+"""
+
     # Create OpenAI client
     client = OpenAI(api_key=OPENAI_API_KEY)
     
@@ -380,7 +457,7 @@ def generate_matching_text(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
+            {"role": "user", "content": prompt}
         ],
         max_tokens=max_tokens,
         temperature=temperature
@@ -417,7 +494,8 @@ def generate_matching_text(
                     refinement_instructions=refinement,
                     model=model,
                     max_tokens=max_tokens,
-                    temperature=temperature
+                    temperature=temperature,
+                    user_context=user_context
                 )
                 
                 # Show the refined text
@@ -435,7 +513,8 @@ def generate_matching_text(
                 refinement_instructions=refinement,
                 model=model,
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                user_context=user_context
             )
     
     # Save to output file if specified

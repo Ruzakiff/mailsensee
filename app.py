@@ -478,6 +478,9 @@ def generate_content():
         length = data.get('length', 300)
         model = data.get('model', 'gpt-4o')
         
+        # Get the user context if provided
+        context = data.get('context', {})
+        
         # Set file paths
         user_dir = os.path.join(DATA_DIR, user_id)
         examples_file = os.path.join(user_dir, "filtered_voice_emails.txt")
@@ -489,7 +492,7 @@ def generate_content():
                 "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
             }), 400
         
-        # Call the generate function - prioritize free-form prompt
+        # Call the generate function with context - prioritize free-form prompt
         if prompt:
             # Use free-form prompt mode when prompt is provided
             generated_text = generate.generate_matching_text(
@@ -498,7 +501,8 @@ def generate_content():
                 max_tokens=2000,
                 length=length,
                 free_form_prompt=prompt,
-                temperature=0  # Low temperature for more predictable results
+                temperature=0,  # Low temperature for more predictable results
+                user_context=context  # Pass the user context
             )
         else:
             # Fallback to structured parameters if no prompt provided
@@ -510,7 +514,8 @@ def generate_content():
                 topic=topic,
                 tone=tone,
                 recipient=recipient,
-                length=length
+                length=length,
+                user_context=context  # Pass the user context
             )
         
         return jsonify({
@@ -529,6 +534,9 @@ def refine_content():
         original_text = data.get('original_text', '')
         refinement_instructions = data.get('refinement', '')
         model = data.get('model', 'gpt-4o')
+        
+        # Get the user context if provided
+        context = data.get('context', {})
         
         if not original_text:
             return jsonify({
@@ -557,14 +565,15 @@ def refine_content():
         with open(examples_file, 'r', encoding='utf-8') as f:
             examples = f.read()
         
-        # Call the refinement function
+        # Call the refinement function with context
         refined_text = generate.refine_generated_text(
             examples=examples,
             original_text=original_text,
             refinement_instructions=refinement_instructions,
             model=model,
             max_tokens=2000,
-            temperature=0
+            temperature=0,
+            user_context=context  # Pass the user context
         )
         
         return jsonify({

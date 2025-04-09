@@ -354,6 +354,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
   
+  // Call API (used by content script)
+  if (request.action === 'callApi' && request.endpoint) {
+    log('API call requested from content script', request);
+    
+    // Ensure context is included
+    if (!request.payload.context && 
+        (request.endpoint.includes('generate') || request.endpoint.includes('refine'))) {
+      
+      // Get user context from storage if not provided
+      chrome.storage.local.get('userState', (result) => {
+        const userState = result.userState || {};
+        
+        if (userState.profile) {
+          // Add context to payload
+          request.payload.context = {
+            name: userState.profile.name || undefined,
+            role: userState.profile.role || undefined,
+            company: userState.profile.company || undefined,
+            industry: userState.profile.industry || undefined,
+            additionalContext: userState.profile.additionalContext || undefined,
+            emailStyle: userState.voiceAnalyzed ? "Analyzed from your previous emails" : "Default style"
+          };
+        }
+        
+        // Make the API call
+        fetch(`${API_URL}/${request.endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request.payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+          sendResponse(data);
+        })
+        .catch(error => {
+          log('Error calling API from background:', error);
+          sendResponse({ error: error.message });
+        });
+      });
+    } else {
+      // Context already included, make the API call directly
+      fetch(`${API_URL}/${request.endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request.payload)
+      })
+      .then(response => response.json())
+      .then(data => {
+        sendResponse(data);
+      })
+      .catch(error => {
+        log('Error calling API from background:', error);
+        sendResponse({ error: error.message });
+      });
+    }
+    
+    return true; // Keep channel open for async response
+  }
+  
   // Check auth status
   if (request.action === 'checkAuth') {
     chrome.storage.local.get('userState', (result) => {

@@ -365,6 +365,12 @@ async function callApi(endpoint, payload, buttonId = null) {
   try {
     log(`Calling API: ${endpoint}`, payload);
     
+    // If context isn't provided and it's a generation endpoint, add it
+    if (!payload.context && 
+        (endpoint.includes('generate') || endpoint.includes('refine'))) {
+      payload.context = getUserContext();
+    }
+    
     // Make the actual API call
     const response = await fetch(`${API_URL}/${endpoint}`, {
       method: 'POST',
@@ -526,9 +532,13 @@ async function handleGenerateContent() {
       return;
     }
     
+    // Get user context
+    const context = getUserContext();
+    
     const result = await callApi('generate-content', {
       user_id: userState.userId,
-      prompt: prompt
+      prompt: prompt,
+      context: context  // Include user profile context
     }, 'generate-test-button');
     
     // Show result
@@ -555,10 +565,14 @@ async function handleRefineContent() {
       return;
     }
     
+    // Get user context
+    const context = getUserContext();
+    
     const result = await callApi('refine-content', {
       user_id: userState.userId,
       original_text: originalText,
-      refinement: refinement
+      refinement: refinement,
+      context: context  // Include user profile context
     }, 'refine-button');
     
     // Update text
@@ -902,7 +916,6 @@ function getUserContext() {
     emailStyle: userState.voiceAnalyzed ? "Analyzed from your previous emails" : "Default style"
   };
 }
-
 // Generate content using user's context
 async function generateContent(prompt) {
   try {

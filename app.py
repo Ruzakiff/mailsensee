@@ -107,20 +107,24 @@ def authenticate():
         # Read client_id from client secrets file
         with open(client_secrets_file, 'r') as f:
             client_info = json.load(f)
-            client_id = client_info['installed']['client_id']
+            # Check if this is a web or installed client
+            client_type = "web" if "web" in client_info else "installed"
+            client_id = client_info[client_type]['client_id']
         
         # Create the authorization URL
         SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
         
-        # Set the appropriate redirect URI
-        is_production = os.environ.get('DEPLOYMENT_ENV') == 'production'
-        redirect_uri = url_for('oauth_callback', _external=True)
+        # Use the redirect URI that's registered in Google Cloud Console
+        redirect_uri = 'https://reelbrief.ai/oauth2callback'
+        
+        print(f"Using redirect URI: {redirect_uri}")
         
         # Store user_id with auth request
         auth_requests[state] = {
             'client_secrets_file': client_secrets_file, 
             'return_url': request.headers.get('Referer'),
-            'user_id': user_id
+            'user_id': user_id,
+            'redirect_uri': redirect_uri
         }
         
         # Build authorization URL
@@ -139,6 +143,10 @@ def authenticate():
         # Return the URL - extension will open this in a new tab
         return jsonify({"success": True, "auth_url": auth_url, "user_id": user_id})
     except Exception as e:
+        import traceback
+        traceback_str = traceback.format_exc()
+        print(f"Authentication error: {str(e)}")
+        print(traceback_str)
         return jsonify({"success": False, "message": str(e)}), 400
 
 # Add a callback endpoint for OAuth
@@ -166,7 +174,7 @@ def oauth_callback():
         flow = Flow.from_client_secrets_file(
             auth_info['client_secrets_file'],
             scopes=['https://www.googleapis.com/auth/gmail.readonly'],
-            redirect_uri=url_for('oauth_callback', _external=True)
+            redirect_uri=auth_info['redirect_uri']
         )
         
         # Exchange code for credentials

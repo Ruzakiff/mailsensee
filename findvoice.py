@@ -434,9 +434,9 @@ async def process_chunks_parallel(chunks: List[str], model: str, max_tokens: int
 async def main():
     """Main function to run the script."""
     parser = argparse.ArgumentParser(description="Process email corpus to extract authentic voice")
-    parser.add_argument("input_file", help="Path to the input email corpus text file")
+    parser.add_argument("--input", "-i", required=True, help="Input filename in S3")
     parser.add_argument("--output", "-o", default="filtered_voice_emails.txt", 
-                       help="Output file path (default: filtered_voice_emails.txt)")
+                       help="Output filename for S3 (default: filtered_voice_emails.txt)")
     parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
                        help=f"OpenAI model to use (default: {DEFAULT_MODEL})")
     parser.add_argument("--chunk-size", "-c", type=int, default=DEFAULT_CHUNK_SIZE,
@@ -457,13 +457,13 @@ async def main():
     args = parser.parse_args()
     
     # Verify input file exists in S3
-    if not file_exists(args.user_id, args.input_file):
-        print(f"Error: Input file '{args.input_file}' not found for user {args.user_id}.")
+    if not file_exists(args.user_id, args.input):
+        print(f"Error: Input file '{args.input}' not found for user {args.user_id}.")
         return 1
     
     # Read the input file from S3
-    print(f"Reading input file: {args.input_file} for user {args.user_id}")
-    text = read_file(args.user_id, args.input_file)
+    print(f"Reading input file: {args.input} for user {args.user_id}")
+    text = read_file(args.user_id, args.input)
     
     # Calculate token count
     token_count = count_tokens(text, args.model)

@@ -362,7 +362,7 @@ def generate_matching_text(
         user_context = {}
     
     # Read the examples file from S3
-    print(f"Reading examples from: {examples_file} for user {user_id}")
+    print(f"Reading examples from S3: {examples_file} for user {user_id}")
     try:
         examples = read_file(user_id, examples_file)
     except Exception as e:

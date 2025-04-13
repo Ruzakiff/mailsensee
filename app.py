@@ -166,10 +166,6 @@ def oauth_callback():
     user_id = auth_info.get('user_id', 'default')
     
     try:
-        # Create tokens directory if it doesn't exist
-        tokens_dir = os.path.join(DATA_DIR, 'tokens')
-        os.makedirs(tokens_dir, exist_ok=True)
-        
         # Create Flow instance with client secrets file
         flow = Flow.from_client_secrets_file(
             auth_info['client_secrets_file'],
@@ -181,10 +177,9 @@ def oauth_callback():
         flow.fetch_token(code=code)
         credentials = flow.credentials
         
-        # Save the credentials for this specific user
-        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
-        with open(token_path, 'wb') as token:
-            pickle.dump(credentials, token)
+        # Save the credentials to S3 instead of local file
+        credentials_pickle = pickle.dumps(credentials)
+        write_pickle(user_id, "gmail_credentials.pickle", credentials)
         
         # Return success page with auto-close script
         return """
@@ -217,26 +212,29 @@ def oauth_callback():
 # Add an endpoint to check auth status
 @app.route('/api/auth-status', methods=['GET'])
 def auth_status():
-    """Check if user is authenticated"""
+    """Check if user is authenticated by verifying their credentials exist in S3"""
     try:
         user_id = request.args.get('user_id', 'default')
-        tokens_dir = os.path.join(DATA_DIR, 'tokens')
-        token_path = os.path.join(tokens_dir, f"{user_id}.pickle")
         
-        if os.path.exists(token_path):
-            with open(token_path, 'rb') as token:
-                creds = pickle.load(token)
+        # Check if credentials exist in S3 instead of local file
+        credentials_file = "gmail_credentials.pickle"
+        if file_exists(user_id, credentials_file):
+            try:
+                # Try to load credentials to verify they're valid
+                creds = read_pickle(user_id, credentials_file)
                 
-            if creds and creds.valid:
-                return jsonify({"authenticated": True})
-            elif creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    with open(token_path, 'wb') as token:
-                        pickle.dump(creds, token)
+                if creds and creds.valid:
                     return jsonify({"authenticated": True})
-                except:
-                    pass
+                elif creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                        # Update refreshed credentials in S3
+                        write_pickle(user_id, credentials_file, creds)
+                        return jsonify({"authenticated": True})
+                    except Exception as refresh_error:
+                        print(f"Error refreshing credentials: {refresh_error}")
+            except Exception as e:
+                print(f"Error reading credentials from S3: {e}")
                     
         return jsonify({"authenticated": False})
     except Exception as e:
@@ -415,13 +413,12 @@ def analyze_voice():
         data = request.json
         user_id = data.get('user_id', 'default')
         
-        # Set file paths
-        user_dir = os.path.join(DATA_DIR, user_id)
-        input_file = os.path.join(user_dir, "sent_emails.txt")
-        output_file = os.path.join(user_dir, "filtered_voice_emails.txt")
+        # Set file paths - Currently using local filesystem
+        input_file = "sent_emails.txt"
+        output_file = "filtered_voice_emails.txt"
         
-        # Check if input file exists
-        if not os.path.exists(input_file):
+        # Check if input file exists in S3 instead of local
+        if not file_exists(user_id, input_file):
             return jsonify({
                 "success": False,
                 "message": f"Input file not found: {input_file}. Please run fetch-history first."
@@ -430,10 +427,11 @@ def analyze_voice():
         # Setup findvoice arguments
         old_argv = sys.argv.copy()
         
-        # Configure arguments for findvoice.main()
+        # Configure arguments for findvoice.main() - Update to use user_id for S3
         sys.argv = [
             'findvoice.py',
-            input_file,
+            '--user-id', user_id,  # Add user_id parameter
+            '--input', input_file,  # Change to just the filename
             '--output', output_file,
             '--model', data.get('model', 'gpt-4o'),
             '--optimize'  # Enable optimization for better results
@@ -485,21 +483,21 @@ def generate_content():
         # Get the user context if provided
         context = data.get('context', {})
         
-        # Set file paths
-        user_dir = os.path.join(DATA_DIR, user_id)
-        examples_file = os.path.join(user_dir, "filtered_voice_emails.txt")
+        # Use S3 filename instead of local path
+        examples_file = "filtered_voice_emails.txt"
         
-        # Check if examples file exists
-        if not os.path.exists(examples_file):
+        # Check if examples file exists in S3
+        if not file_exists(user_id, examples_file):
             return jsonify({
                 "success": False,
                 "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
             }), 400
         
-        # Call the generate function with context - prioritize free-form prompt
+        # Call the generate function with S3 access
         if prompt:
             # Use free-form prompt mode when prompt is provided
             generated_text = generate.generate_matching_text(
+                user_id=user_id,  # Pass user_id for S3 access
                 examples_file=examples_file,
                 model=model,
                 max_tokens=2000,
@@ -511,6 +509,7 @@ def generate_content():
         else:
             # Fallback to structured parameters if no prompt provided
             generated_text = generate.generate_matching_text(
+                user_id=user_id,  # Pass user_id for S3 access
                 examples_file=examples_file,
                 model=model,
                 max_tokens=2000,
@@ -554,20 +553,18 @@ def refine_content():
                 "message": "Refinement instructions are required."
             }), 400
         
-        # Set file paths
-        user_dir = os.path.join(DATA_DIR, user_id)
-        examples_file = os.path.join(user_dir, "filtered_voice_emails.txt")
+        # Use S3 filename instead of local path
+        examples_file = "filtered_voice_emails.txt"
         
-        # Check if examples file exists
-        if not os.path.exists(examples_file):
+        # Check if examples file exists in S3
+        if not file_exists(user_id, examples_file):
             return jsonify({
                 "success": False,
                 "message": f"Examples file not found: {examples_file}. Please run analyze-voice first."
             }), 400
         
-        # Read examples
-        with open(examples_file, 'r', encoding='utf-8') as f:
-            examples = f.read()
+        # Read examples from S3
+        examples = read_file(user_id, examples_file)
         
         # Call the refinement function with context
         refined_text = generate.refine_generated_text(
@@ -587,143 +584,11 @@ def refine_content():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 400
 
-# Move the test functions here, but don't call them immediately
-
-def test_authenticate():
-    url = "http://localhost:5000/api/authenticate"
-    response = requests.post(url, json={})
-    
-    print("Authentication Response:")
-    print(f"Status Code: {response.status_code}")
-    print(json.dumps(response.json(), indent=2))
-
-def test_fetch_history():
-    url = "http://localhost:5000/api/fetch-history"
-    payload = {
-        "user_id": "test_user",
-        "after_date": "2019/01/01",
-        "before_date": "2022/01/01"
-    }
-    
-    response = requests.post(url, json=payload)
-    
-    print("Fetch History Response:")
-    print(f"Status Code: {response.status_code}")
-    print(json.dumps(response.json(), indent=2))
-
-def test_analyze_voice():
-    url = "http://localhost:5000/api/analyze-voice"
-    payload = {
-        "user_id": "test_user"
-    }
-    
-    response = requests.post(url, json=payload)
-    
-    print("Analyze Voice Response:")
-    print(f"Status Code: {response.status_code}")
-    print(json.dumps(response.json(), indent=2))
-
-def test_generate_content():
-    url = "http://localhost:5000/api/generate-content"
-    payload = {
-        "user_id": "test_user",
-        "prompt": "Write a professional email explaining a project delay",
-        "genre": "email",
-        "topic": "project update",
-        "tone": "professional",
-        "recipient": "manager",
-        "length": 200
-    }
-    
-    response = requests.post(url, json=payload)
-    
-    print("Generate Content Response:")
-    print(f"Status Code: {response.status_code}")
-    print(json.dumps(response.json(), indent=2))
-
-def test_all_endpoints():
-    base_url = "http://localhost:5000/api"
-    
-    # Test 1: Authentication
-    print("\n=== Testing Authentication ===")
-    auth_response = requests.post(f"{base_url}/authenticate", json={})
-    print(f"Status: {auth_response.status_code}")
-    print(json.dumps(auth_response.json(), indent=2))
-    
-    # Proceed only if authentication was successful
-    if not auth_response.json().get("success", False):
-        print("Authentication failed. Cannot proceed with further tests.")
-        return
-    
-    # Test 2: Fetch History
-    print("\n=== Testing Fetch History ===")
-    fetch_payload = {
-        "user_id": "test_user",
-        "after_date": "2019/01/01",
-        "before_date": "2022/01/01"
-    }
-    
-    fetch_response = requests.post(f"{base_url}/fetch-history", json=fetch_payload)
-    print(f"Status: {fetch_response.status_code}")
-    print(json.dumps(fetch_response.json(), indent=2))
-    
-    # Allow some time for the file to be written
-    time.sleep(2)
-    
-    # Test 3: Analyze Voice
-    print("\n=== Testing Analyze Voice ===")
-    voice_payload = {
-        "user_id": "test_user"
-    }
-    
-    voice_response = requests.post(f"{base_url}/analyze-voice", json=voice_payload)
-    print(f"Status: {voice_response.status_code}")
-    print(json.dumps(voice_response.json(), indent=2))
-    
-    # Allow some time for processing
-    time.sleep(2)
-    
-    # Test 4: Generate Content
-    print("\n=== Testing Generate Content ===")
-    generate_payload = {
-        "user_id": "test_user",
-        "prompt": "Write a professional email explaining a project delay",
-        "genre": "email",
-        "topic": "project update",
-        "tone": "professional",
-        "recipient": "manager",
-        "length": 200
-    }
-    
-    generate_response = requests.post(f"{base_url}/generate-content", json=generate_payload)
-    print(f"Status: {generate_response.status_code}")
-    
-    result = generate_response.json()
-    
-    # Print the generated text separately for better readability
-    if "generated_text" in result:
-        generated_text = result.pop("generated_text")
-        print(json.dumps(result, indent=2))
-        print("\nGenerated Text:")
-        print("=" * 50)
-        print(generated_text)
-        print("=" * 50)
-    else:
-        print(json.dumps(result, indent=2))
-
 if __name__ == "__main__":
-    import sys
+    # Get host and port from environment variables with defaults
+    host = os.environ.get('HOST', '0.0.0.0')  # Listen on all interfaces by default
+    port = int(os.environ.get('PORT', 8080))
+    debug = True
     
-    # Check if we want to run tests or start the server
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        print("Running tests against Flask server...")
-        print("Make sure the server is already running in another terminal!")
-        test_all_endpoints()
-    else:
-        # Get host and port from environment variables with defaults
-        host = os.environ.get('HOST', '0.0.0.0')  # Listen on all interfaces by default
-        port = int(os.environ.get('PORT', 8080))
-        debug = True
-        
-        print(f"Starting Flask server on {host}:{port} (debug={debug})...")
-        app.run(host=host, port=port, debug=debug) 
+    print(f"Starting Flask server on {host}:{port} (debug={debug})...")
+    app.run(host=host, port=port, debug=debug) 

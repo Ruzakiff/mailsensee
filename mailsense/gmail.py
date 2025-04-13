@@ -3,10 +3,45 @@ from .auth import get_credentials
 import os
 import pickle
 from google.auth.transport.requests import Request
+from .storage import read_pickle, file_exists, write_pickle
 
 def get_user_credentials(user_id='default'):
     """Get credentials for a specific user."""
-    # Path to the user's token file - configurable for Docker environments
+    # First try with the known filename
+    token_file = "gmail_credentials.pickle"  # This is the filename used in the OAuth flow
+    
+    if file_exists(user_id, token_file):
+        try:
+            creds = read_pickle(user_id, token_file)
+            
+            if not creds.valid:
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    write_pickle(user_id, token_file, creds)
+                else:
+                    raise Exception(f"Invalid credentials for user {user_id}")
+            return creds
+        except Exception as e:
+            raise Exception(f"Error loading credentials for {user_id}: {str(e)}")
+    
+    # Try alternate filenames as fallbacks
+    alt_token_files = ["gmail_token.pickle", "token.pickle"]
+    for alt_file in alt_token_files:
+        if file_exists(user_id, alt_file):
+            try:
+                creds = read_pickle(user_id, alt_file)
+                
+                if not creds.valid:
+                    if creds.expired and creds.refresh_token:
+                        creds.refresh(Request())
+                        write_pickle(user_id, alt_file, creds)
+                    else:
+                        continue  # Try next file
+                return creds
+            except Exception:
+                continue  # Try next file
+    
+    # Fallback to local files - configurable for Docker environments
     data_dir = os.environ.get('DATA_DIR', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "user_data"))
     tokens_dir = os.path.join(data_dir, 'tokens')
     os.makedirs(tokens_dir, exist_ok=True)

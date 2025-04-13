@@ -357,7 +357,7 @@ function setButtonLoading(buttonId, isLoading, text = null) {
 // ==== API OPERATIONS ====
 
 // Call the API with proper error handling
-async function callApi(endpoint, payload, buttonId = null) {
+async function callApi(endpoint, payload = null, buttonId = null, method = 'POST', queryParams = null) {
   if (buttonId) {
     setButtonLoading(buttonId, true);
   }
@@ -365,27 +365,44 @@ async function callApi(endpoint, payload, buttonId = null) {
   try {
     log(`Calling API: ${endpoint}`, payload);
     
+    // Build API URL with query params if needed
+    let url = endpoint;
+    if (queryParams) {
+      const queryString = Object.entries(queryParams)
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+        .join('&');
+      url = `${endpoint}?${queryString}`;
+    }
+    
     // If context isn't provided and it's a generation endpoint, add it
-    if (!payload.context && 
-        (endpoint.includes('generate') || endpoint.includes('refine'))) {
+    if (!payload?.context && 
+        (endpoint.includes('generate') || endpoint.includes('refine')) &&
+        method === 'POST') {
+      payload = payload || {};
       payload.context = getUserContext();
     }
     
-    // Make the actual API call
-    const response = await fetch(`${API_URL}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    // Make the actual API call via background script
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: 'callApi',
+        endpoint: url,
+        payload: payload,
+        method: method
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (response.error) {
+          reject(new Error(response.error));
+          return;
+        }
+        
+        resolve(response);
+      });
     });
-    
-    // Parse response
-    const data = await response.json();
-    
-    if (!data.success) {
-      throw new Error(data.message || `Failed to call ${endpoint}`);
-    }
-    
-    return data;
   } catch (error) {
     log(`API Error (${endpoint}):`, error);
     
@@ -471,22 +488,156 @@ async function handleFetchHistory() {
     const beforeDate = document.getElementById('before-date').value;
     const emailLimit = document.getElementById('email-limit').value;
     
-    const result = await callApi('fetch-history', {
+    // Show loading state
+    const fetchButton = document.getElementById('fetch-history-button');
+    fetchButton.textContent = "Starting...";
+    fetchButton.disabled = true;
+    
+    // Call the new start-fetch-history endpoint
+    const result = await callApi('start-fetch-history', {
       user_id: userState.userId,
       after_date: afterDate,
       before_date: beforeDate,
-      email_limit: parseInt(emailLimit)
-    }, 'fetch-history-button');
+      limit: parseInt(emailLimit)
+    });
     
+    if (!result.success) {
+      throw new Error(result.message || "Failed to start email fetch");
+    }
+    
+    // Get the job ID from the response
+    const jobId = result.job_id;
+    log('Email fetch job started', { jobId });
+    
+    // Show polling UI
+    fetchButton.textContent = "Fetching emails...";
+    
+    // Get and show the progress container
+    const progressContainer = document.getElementById('fetch-progress-container');
+    progressContainer.classList.remove('hidden');
+    progressContainer.innerHTML = `
+      <div class="progress-bar-container">
+        <div class="progress-bar" style="width: 0%"></div>
+      </div>
+      <div class="progress-status">Starting fetch job...</div>
+    `;
+    
+    // Start polling for status
+    await pollJobStatus(jobId, progressContainer);
+    
+    // Update UI when done
     userState.emailsFetched = true;
     userState.lastError = null;
     await saveState();
-    
     updateUI();
+    
   } catch (error) {
     showError(`Failed to fetch emails: ${error.message}`);
+    // Reset button
+    const fetchButton = document.getElementById('fetch-history-button');
+    fetchButton.textContent = "Fetch Email History";
+    fetchButton.disabled = false;
     updateUI();
   }
+}
+
+// Poll job status until completion or failure
+async function pollJobStatus(jobId, statusElement) {
+  return new Promise((resolve, reject) => {
+    const progressBar = statusElement.querySelector('.progress-bar');
+    const progressStatus = statusElement.querySelector('.progress-status');
+    let pollCount = 0;
+    
+    const checkStatus = async () => {
+      try {
+        // Call the fetch-history-status endpoint with GET parameters
+        const status = await callApi(
+          'fetch-history-status', 
+          null,  // No payload for GET request
+          null,  // No button ID
+          'GET', // Use GET method
+          {      // Query parameters
+            job_id: jobId,
+            user_id: userState.userId
+          }
+        );
+        
+        pollCount++;
+        
+        if (!status.success) {
+          progressStatus.textContent = `Error: ${status.message || "Unknown error"}`;
+          progressStatus.style.color = '#d32f2f';
+          reject(new Error(status.message || "Failed to check job status"));
+          return;
+        }
+        
+        // Update progress in UI
+        const progress = status.progress || {};
+        const fetchedCount = progress.total_fetched || 0;
+        const processedCount = progress.processed || 0;
+        
+        // Calculate percentage - if we know the limit
+        let percentComplete = Math.min(
+          Math.round((fetchedCount / 100) * 100), // Simple percentage if no limit
+          100
+        );
+        
+        // Update progress bar
+        progressBar.style.width = `${percentComplete}%`;
+        
+        // Update status message
+        progressStatus.textContent = `Processed ${fetchedCount} emails (${processedCount} with content)`;
+        
+        // Check job status
+        const jobStatus = status.status;
+        
+        if (jobStatus === 'completed') {
+          progressStatus.textContent = `✅ Complete! Processed ${fetchedCount} emails (${processedCount} with content)`;
+          progressBar.style.width = '100%';
+          progressBar.style.backgroundColor = '#34a853';
+          
+          // Reset button
+          const fetchButton = document.getElementById('fetch-history-button');
+          fetchButton.textContent = "Fetch Email History";
+          fetchButton.disabled = false;
+          
+          resolve();
+          return;
+        } else if (jobStatus === 'failed') {
+          progressStatus.textContent = `❌ Failed: ${status.message || "Unknown error"}`;
+          progressStatus.style.color = '#d32f2f';
+          
+          // Reset button
+          const fetchButton = document.getElementById('fetch-history-button');
+          fetchButton.textContent = "Retry";
+          fetchButton.disabled = false;
+          
+          reject(new Error(status.message || "Job failed"));
+          return;
+        }
+        
+        // For pending or in_progress, continue polling
+        setTimeout(checkStatus, 2000); // Poll every 2 seconds
+      } catch (error) {
+        progressStatus.textContent = `Error checking status: ${error.message}`;
+        progressStatus.style.color = '#d32f2f';
+        
+        // After 5 failed attempts, offer a retry button
+        if (pollCount > 5) {
+          const fetchButton = document.getElementById('fetch-history-button');
+          fetchButton.textContent = "Retry";
+          fetchButton.disabled = false;
+          reject(error);
+        } else {
+          // Try again after a slightly longer delay
+          setTimeout(checkStatus, 3000);
+        }
+      }
+    };
+    
+    // Start checking
+    checkStatus();
+  });
 }
 
 // Handle voice analysis

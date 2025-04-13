@@ -354,12 +354,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
   
-  // Call API (used by content script)
-  if (request.action === 'callApi' && request.endpoint) {
-    log('API call requested from content script', request);
+  // API call proxy
+  if (request.action === 'callApi') {
+    log('API call requested:', request.endpoint);
     
-    // Ensure context is included
-    if (!request.payload.context && 
+    // Handle method (default to POST)
+    const method = request.method || 'POST';
+    
+    // For GET requests or status endpoints, don't try to add context
+    if (method === 'GET' || request.endpoint.includes('status')) {
+      // Build the appropriate URL
+      let apiUrl = `${API_URL}/${request.endpoint}`;
+      
+      fetch(apiUrl, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(response => response.json())
+      .then(data => {
+        sendResponse(data);
+      })
+      .catch(error => {
+        log('Error calling API from background:', error);
+        sendResponse({ error: error.message });
+      });
+      
+      return true; // Keep channel open for async response
+    }
+    
+    // For POST requests that need context (generate/refine)
+    if (!request.payload?.context && 
         (request.endpoint.includes('generate') || request.endpoint.includes('refine'))) {
       
       // Get user context from storage if not provided
@@ -368,6 +392,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         if (userState.profile) {
           // Add context to payload
+          request.payload = request.payload || {};
           request.payload.context = {
             name: userState.profile.name || undefined,
             role: userState.profile.role || undefined,
@@ -380,7 +405,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         // Make the API call
         fetch(`${API_URL}/${request.endpoint}`, {
-          method: 'POST',
+          method: method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(request.payload)
         })
@@ -394,12 +419,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
     } else {
-      // Context already included, make the API call directly
-      fetch(`${API_URL}/${request.endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request.payload)
-      })
+      // Context already included or not needed, make the API call directly
+      let fetchOptions = {
+        method: method,
+        headers: { 'Content-Type': 'application/json' }
+      };
+      
+      // Only add body for POST requests
+      if (method === 'POST' && request.payload) {
+        fetchOptions.body = JSON.stringify(request.payload);
+      }
+      
+      fetch(`${API_URL}/${request.endpoint}`, fetchOptions)
       .then(response => response.json())
       .then(data => {
         sendResponse(data);
